@@ -31,5 +31,5 @@ jobs:
       - name: Run tests
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+      - name: Test packed package and declarations
+        run: pnpm test:package

@@ -20,6 +20,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:package": "pnpm build && node scripts/test-package.mjs",
     "prepublishOnly": "tsc"
   },
   "keywords": [

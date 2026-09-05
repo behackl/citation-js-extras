@@ -100,6 +100,21 @@ Restoration runs after title linking, badges, and URL linkification. Neither
 renderer output nor restored TeX is fed back through these HTML helpers. Disabling
 preservation (the default) retains the previous behavior.
 
+## Development checks
+
+```sh
+pnpm install --frozen-lockfile
+pnpm test          # Unit tests and actual MathJax SVG integration (base + AMS)
+pnpm test:package  # Build, pack, install into a temporary consumer, and test exports
+```
+
+The package check validates ESM imports, TypeScript declarations under both
+NodeNext and Bundler resolution, and MathJax rendering through the installed
+tarball. Its temporary consumer is removed afterwards. Installation prefers the
+local cache but may need registry access on a fresh machine. CI runs both checks.
+MathJax is a development-only dependency, not a runtime dependency for consumers.
+Use Node 22 or newer for these development checks, matching CI's Node 22 baseline.
+
 ## API
 
 ### `new Bibliography(options)`
