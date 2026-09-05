@@ -46,8 +46,16 @@ export interface BadgeConfig {
   className?: string;
 }
 
+/** Synchronous renderer returning trusted HTML. Sanitize untrusted renderer output. */
+export type MathRenderer = (tex: string, context: { display: boolean }) => string;
+
 /** Options passed to {@link Bibliography.formatHtml}. */
 export interface FormatOptions {
+  /** Render protected math as trusted HTML; requires preserveMath at construction.
+   * Without this callback, escaped original TeX delimiters are restored.
+   */
+  renderMath?: MathRenderer;
+
   /**
    * Fields to use for linking the title, checked in order.
    * A `doi` value is expanded to `https://doi.org/<value>`, an `arxiv`
@@ -103,6 +111,12 @@ export interface BibEntry {
 
 /** Options for constructing a {@link Bibliography}. */
 export interface BibliographyOptions {
+  /** Preserve math in supported display-text fields before CSL conversion.
+   * Opt-in; entries' CSL text contains internal placeholders until HTML formatting.
+   * Raw/custom fields remain unchanged. Unclosed or empty math throws.
+   */
+  preserveMath?: boolean;
+
   /**
    * BibTeX input — either a raw BibTeX string or a file path.
    * When a file path is given, it is read synchronously at construction time.

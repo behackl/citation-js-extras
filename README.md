@@ -51,6 +51,55 @@ const html = bib.formatHtml(sorted, {
 });
 ```
 
+## Preserving mathematics
+
+Citation.js normally converts TeX math to text, losing delimiters and potentially
+complex expressions. Enable preservation before parsing:
+
+```ts
+const bib = new Bibliography({
+  data: "./references.bib",
+  preserveMath: true,
+});
+
+// Restore HTML-escaped original TeX for client-side MathJax:
+const html = bib.formatHtml(bib.entries);
+
+// Or typeset at build time with your own synchronous renderer:
+const rendered = bib.formatHtml(bib.entries, {
+  renderMath: (tex, { display }) => myMathRenderer(tex, display),
+});
+```
+
+`myMathRenderer` is an application-supplied function returning **trusted HTML**
+(e.g. MathJax SVG or KaTeX output). No math renderer is bundled. Configure it for
+untrusted TeX as appropriate; the callback output is inserted verbatim, not
+sanitized. Exceptions propagate to the caller. `renderMath` also works with
+`formatEntry`; it has no effect unless `preserveMath` was enabled.
+
+Supported delimiters are `$…$`, `$$…$$`, `\(…\)`, and `\[…\]`.
+Escape literal dollars as `\$`. Empty or unclosed expressions throw with the
+citation key and field name. This is a delimiter scanner, not a TeX validator:
+unsupported commands and mathematical validity are the renderer's responsibility.
+
+Protection covers `title`, `subtitle`, `titleaddon`, `shorttitle`, `booktitle`,
+`booksubtitle`, `booktitleaddon`, `maintitle`, `mainsubtitle`, `maintitleaddon`,
+`journaltitle`, `journalsubtitle`, `journal`, `note`, `annote`, `abstract`, and
+`howpublished`. Fields still need to be supported by Citation.js and the chosen
+CSL style to appear in the output. Names, identifiers, URLs, and custom metadata
+are not protected. BibTeX strings and concatenations are resolved before protection;
+inherited cross-reference text is protected during conversion.
+
+Original `.raw` and `.custom` values remain unchanged. With preservation enabled,
+`.csl` contains internal placeholders: use the formatting methods for HTML and
+raw fields for original source text, not `.csl` for plain-text exports. Placeholders
+also mean CSL title-based sorting/disambiguation operates on protected text rather
+than mathematical meaning. Existing caller-controlled ordering is retained.
+
+Restoration runs after title linking, badges, and URL linkification. Neither
+renderer output nor restored TeX is fed back through these HTML helpers. Disabling
+preservation (the default) retains the previous behavior.
+
 ## API
 
 ### `new Bibliography(options)`
@@ -60,6 +109,7 @@ const html = bib.formatHtml(sorted, {
 | `data` | `string` | BibTeX input — a raw string or a file path. |
 | `cslStyle` | `string?` | CSL style — a registered template name, raw XML, or a file path. Defaults to `'apa'`. |
 | `customFields` | `string[]?` | BibTeX field names to preserve. These appear on each entry under `.custom`. |
+| `preserveMath` | `boolean?` | Preserve math in display-text fields through CSL formatting. Defaults to `false`. |
 
 ### `bib.entries`
 

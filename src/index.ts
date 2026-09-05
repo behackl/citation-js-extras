@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import Cite from "citation-js";
+import { MathProtector } from "./math.js";
 import type { BadgeConfig, BibEntry, BibliographyOptions, FormatOptions } from "./types.js";
 
-export type { BadgeConfig, BibEntry, BibliographyOptions, FormatOptions } from "./types.js";
+export type { BadgeConfig, BibEntry, BibliographyOptions, FormatOptions, MathRenderer } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Bibliography class
@@ -16,6 +17,7 @@ export class Bibliography {
   readonly entries: BibEntry[];
 
   private readonly customFieldNames: string[];
+  private readonly math?: MathProtector;
 
   constructor(options: BibliographyOptions) {
     const bibData = maybeReadFile(options.data);
@@ -26,14 +28,22 @@ export class Bibliography {
 
     // Two-pass parse: raw (preserves all fields) + CSL (for formatting)
     const { plugins } = Cite;
-    const rawEntries: { label: string; properties: Record<string, any> }[] =
+    const rawEntries: { type: string; label: string; properties: Record<string, any> }[] =
       plugins.input.chainLink(bibData);
     const rawMap = new Map<string, Record<string, any>>();
     for (const entry of rawEntries) {
       rawMap.set(entry.label, entry.properties);
     }
 
-    const cite = new Cite(bibData);
+    // Protect resolved raw fields, after BibTeX strings/concatenations are parsed
+    // but before the lossy TeX-to-CSL conversion. Keep the original raw map intact.
+    this.math = options.preserveMath
+      ? new MathProtector(JSON.stringify(rawEntries)) : undefined;
+    const cite = this.math
+      ? new Cite(rawEntries.map(entry => ({
+          ...entry, properties: this.math!.protect(entry.properties, entry.label),
+        })))
+      : new Cite(bibData);
     this.entries = (cite.data as Record<string, any>[]).map(
       (csl): BibEntry => {
         const key = String(csl["citation-key"] || csl.id);
@@ -100,7 +110,8 @@ export class Bibliography {
     const rendered = this.renderCslEntries([entry]);
     const raw = rendered[0]?.[1] ?? "";
     const innerHtml = unwrapCslEntry(raw) ?? raw.trim();
-    return this.decorateEntryHtml(entry, innerHtml, options);
+    const decorated = this.decorateEntryHtml(entry, innerHtml, options);
+    return this.math ? this.math.restore(decorated, options.renderMath) : decorated;
   }
 
   /**
@@ -136,7 +147,7 @@ export class Bibliography {
       html = linkifyBareUrls(html);
     }
 
-    return html;
+    return this.math ? this.math.restore(html, options.renderMath) : html;
   }
 
   // -------------------------------------------------------------------------
