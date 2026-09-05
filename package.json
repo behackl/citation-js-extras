@@ -52,6 +52,7 @@
     "citation-js": ">=0.7.0"
   },
   "devDependencies": {
+    "@mathjax/src": "4.1.0",
     "@types/node": "^25.2.3",
     "citation-js": "^0.7.22",
     "typescript": "^5.9.3",
