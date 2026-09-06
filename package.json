@@ -35,12 +35,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/behackl/citation-js-extra.git"
+    "url": "git+https://github.com/behackl/citation-js-extras.git"
   },
   "bugs": {
-    "url": "https://github.com/behackl/citation-js-extra/issues"
+    "url": "https://github.com/behackl/citation-js-extras/issues"
   },
-  "homepage": "https://github.com/behackl/citation-js-extra#readme",
+  "homepage": "https://github.com/behackl/citation-js-extras#readme",
   "publishConfig": {
     "access": "public"
   },
