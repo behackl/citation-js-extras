@@ -113,7 +113,7 @@ NodeNext and Bundler resolution, and MathJax rendering through the installed
 tarball. Its temporary consumer is removed afterwards. Installation prefers the
 local cache but may need registry access on a fresh machine. CI runs both checks.
 MathJax is a development-only dependency, not a runtime dependency for consumers.
-Use Node 22 or newer for these development checks, matching CI's Node 22 baseline.
+Use Node 24 LTS for these development checks, matching CI and publishing.
 
 ## API
 
