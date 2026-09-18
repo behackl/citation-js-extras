@@ -74,7 +74,9 @@ const rendered = bib.formatHtml(bib.entries, {
 `myMathRenderer` is an application-supplied function returning **trusted HTML**
 (e.g. MathJax SVG or KaTeX output). No math renderer is bundled. Configure it for
 untrusted TeX as appropriate; the callback output is inserted verbatim, not
-sanitized. Exceptions propagate to the caller. `renderMath` also works with
+sanitized. Treat renderer output as untrusted HTML unless you control both the
+renderer configuration and the TeX: substitute it only after the surrounding
+HTML has been sanitized (see below). Exceptions propagate to the caller. `renderMath` also works with
 `formatEntry`; it has no effect unless `preserveMath` was enabled.
 
 Supported delimiters are `$…$`, `$$…$$`, `\(…\)`, and `\[…\]`.
@@ -134,6 +136,12 @@ Two related gotchas when using `rehype-sanitize`:
 - pick a placeholder that cannot occur in your bibliography (append characters
   until it is absent from the source)
 
+This recipe deliberately reinserts renderer output *after* sanitizing, so it is
+only as safe as the renderer: a renderer configured to emit arbitrary markup
+(for instance KaTeX with `trust: true`) can reintroduce `<script>`. Restrict the
+renderer configuration, or sanitize its output separately with a schema that
+keeps the elements and attributes mathematics needs.
+
 ## Development checks
 
 ```sh
@@ -159,9 +167,9 @@ Use Node 24 LTS for these development checks, matching CI and publishing.
 | `cslStyle` | `string?` | CSL style — a registered template name, raw XML, or a file path. Defaults to `'apa'`. |
 | `customFields` | `string[]?` | BibTeX field names to preserve. These appear on each entry under `.custom`. |
 | `preserveMath` | `boolean?` | Preserve math in display-text fields through CSL formatting. Defaults to `false`. |
-| `titleLink` | `string[]?` | Default for {@link FormatOptions.titleLink}. |
-| `badges` | `BadgeConfig[]?` | Default badge configuration, used by every `formatHtml`/`formatEntry` call. |
-| `linkifyUrls` | `boolean?` | Default for URL linkification. |
+| `titleLink` | `string[]?` | Default fields used for the title link, checked in order. Defaults to `['url', 'doi', 'arxiv']`. |
+| `badges` | `BadgeConfig[]?` | Default badge configuration, used by every `formatHtml`/`formatEntry` call. No badges are rendered unless set. |
+| `linkifyUrls` | `boolean?` | Default for URL linkification. Defaults to `true`. |
 
 `titleLink`, `badges` and `linkifyUrls` are usually the same for every call, so
 they can be set once here; a value passed to `formatHtml`/`formatEntry` overrides
@@ -214,6 +222,8 @@ bib.formatHtml(entries, {
 ```
 
 Entries are formatted in one citeproc pass, so style-dependent state (for example numeric labels in Vancouver) remains correct.
+
+An empty entry list returns an empty string, not an empty wrapper element.
 
 ### `bib.formatEntry(entry, options?)`
 

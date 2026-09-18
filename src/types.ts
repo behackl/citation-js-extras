@@ -49,18 +49,21 @@ export interface BadgeConfig {
 /** Synchronous renderer returning trusted HTML. Sanitize untrusted renderer output. */
 export type MathRenderer = (tex: string, context: { display: boolean }) => string;
 
-/** Options passed to {@link Bibliography.formatHtml}. */
+/**
+ * Options passed to {@link Bibliography.formatHtml} or
+ * {@link Bibliography.formatEntry}. `list` and `listAttributes` only apply to
+ * `formatHtml`, which is the only method emitting a wrapper element.
+ */
 export interface FormatOptions {
-  /**
-   * Values given here override the defaults passed to the constructor.
-   */
   /** Render protected math as trusted HTML; requires preserveMath at construction.
    * Without this callback, escaped original TeX delimiters are restored.
+   * Not settable on the constructor.
    */
   renderMath?: MathRenderer;
 
   /**
    * Fields to use for linking the title, checked in order.
+   * Overrides the constructor default, if any.
    * A `doi` value is expanded to `https://doi.org/<value>`, an `arxiv`
    * value to `https://arxiv.org/abs/<value>`, and direct values are only
    * accepted when they use `http`, `https`, or `mailto`.
@@ -69,7 +72,12 @@ export interface FormatOptions {
    */
   titleLink?: string[];
 
-  /** Badge configurations to append to each entry. */
+  /**
+   * Badge configurations to append to each entry.
+   * Overrides the constructor default, if any.
+   *
+   * @default [] (no badges)
+   */
   badges?: BadgeConfig[];
 
   /**
@@ -89,6 +97,7 @@ export interface FormatOptions {
   /**
    * Auto-linkify bare `http(s)://` URLs in the rendered output that aren't
    * already inside `<a>`, `<script>`, or `<style>` tags.
+   * Overrides the constructor default, if any.
    *
    * @default true
    */
@@ -112,7 +121,10 @@ export interface BibEntry {
   raw: Record<string, any>;
 }
 
-/** Formatting options that can be set once and overridden per call. */
+/**
+ * Formatting options that can be set once on the constructor and overridden
+ * by the options of an individual `formatHtml`/`formatEntry` call.
+ */
 export type FormatDefaults = Pick<FormatOptions, "titleLink" | "badges" | "linkifyUrls">;
 
 /** Options for constructing a {@link Bibliography}. */
