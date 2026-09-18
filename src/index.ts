@@ -124,15 +124,28 @@ export class Bibliography {
 
   /**
    * Format a single entry as an HTML string (no wrapper element).
-   * Applies title linking and badge injection.
+   * Applies title linking, badge injection and URL linkification.
    */
   formatEntry(entry: BibEntry, options: FormatOptions = {}): string {
     const merged = this.mergeOptions(options);
     const rendered = this.renderCslEntries([entry]);
     const raw = rendered[0]?.[1] ?? "";
     const innerHtml = unwrapCslEntry(raw) ?? raw.trim();
-    const decorated = this.decorateEntryHtml(entry, innerHtml, merged);
-    return this.restoreMath(decorated, merged, entry);
+    return this.buildEntryHtml(entry, innerHtml, merged);
+  }
+
+  /**
+   * Decorate, linkify and restore math for one rendered entry. Shared by
+   * `formatEntry` and `formatHtml` so both honour the same options.
+   *
+   * Linkification runs before math restoration: rendered MathML carries an
+   * xmlns URL that must not be turned into a link. Math is restored per entry
+   * so a failing formula can be reported with its citation key.
+   */
+  private buildEntryHtml(entry: BibEntry, innerRaw: string, merged: FormatOptions): string {
+    let inner = this.decorateEntryHtml(entry, innerRaw, merged);
+    if (merged.linkifyUrls !== false) inner = linkifyBareUrls(inner);
+    return this.restoreMath(inner, merged, entry);
   }
 
   /** Per-call options win over the defaults given to the constructor. */
@@ -184,12 +197,7 @@ export class Bibliography {
         ?? rendered[index]?.[1]
         ?? "";
       const innerRaw = unwrapCslEntry(raw) ?? raw.trim();
-      let inner = this.decorateEntryHtml(entry, innerRaw, merged);
-      // Linkify before restoring math: rendered MathML carries an xmlns URL
-      // that must not be turned into a link. Both steps run per entry so that
-      // a failing formula can be reported with its citation key.
-      if (merged.linkifyUrls !== false) inner = linkifyBareUrls(inner);
-      inner = this.restoreMath(inner, merged, entry);
+      const inner = this.buildEntryHtml(entry, innerRaw, merged);
       return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${inner}</${itemTag}>`;
     });
 

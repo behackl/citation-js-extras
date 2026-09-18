@@ -219,6 +219,8 @@ Entries are formatted in one citeproc pass, so style-dependent state (for exampl
 
 Render a single entry as an HTML string (no list wrapper). The title link targets the actual CSL title text, regardless of italics.
 
+Accepts the same title linking, badge and `linkifyUrls` options as `formatHtml` and applies them identically (`list`/`listAttributes` are ignored — there is no wrapper). Bare URLs are linkified unless `linkifyUrls: false` is set, either per call or on the constructor.
+
 For citation styles that depend on multi-entry context (numbered labels, ibid behavior, etc.), prefer `formatHtml(...)`.
 
 Title links are only created for safe URL schemes (`http`, `https`, `mailto`) or normalized DOI/arXiv links.

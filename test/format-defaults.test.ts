@@ -49,6 +49,32 @@ describe("formatting defaults from the constructor", () => {
   });
 });
 
+describe("formatEntry honours linkifyUrls like formatHtml", () => {
+  const bareUrl = (html: string) => /<a href="(https?:[^"]+)">\1<\/a>/.test(html);
+
+  it("linkifies bare URLs by default", () => {
+    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"] });
+    const entry = bib.entries[0]!;
+    expect(bareUrl(bib.formatEntry(entry))).toBe(true);
+    expect(bareUrl(bib.formatHtml([entry]))).toBe(true);
+  });
+
+  it("respects a constructor default of false", () => {
+    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], linkifyUrls: false });
+    expect(bareUrl(bib.formatEntry(bib.entries[0]!))).toBe(false);
+  });
+
+  it("lets a call override a true default", () => {
+    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], linkifyUrls: true });
+    expect(bareUrl(bib.formatEntry(bib.entries[0]!, { linkifyUrls: false }))).toBe(false);
+  });
+
+  it("lets a call override a false default", () => {
+    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], linkifyUrls: false });
+    expect(bareUrl(bib.formatEntry(bib.entries[0]!, { linkifyUrls: true }))).toBe(true);
+  });
+});
+
 describe("math error attribution", () => {
   const failing = () => {
     throw new Error("Undefined control sequence");
@@ -82,6 +108,16 @@ describe("rendered math and URL linkification", () => {
     const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
     const html = bib.formatHtml(bib.entries, {
       // Stand-in for KaTeX/MathJax output, which carries an xmlns URL.
+      renderMath: tex => `<math xmlns="http://www.w3.org/1998/Math/MathML">${tex}</math>`,
+    });
+    expect(html).toContain('xmlns="http://www.w3.org/1998/Math/MathML"');
+    expect(html).not.toContain('<a href="http://www.w3.org/1998/Math/MathML"');
+  });
+
+  it("does not linkify the MathML namespace URL in formatEntry either", () => {
+    const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
+    const entry = bib.entries.find(item => item.key === "math:2024")!;
+    const html = bib.formatEntry(entry, {
       renderMath: tex => `<math xmlns="http://www.w3.org/1998/Math/MathML">${tex}</math>`,
     });
     expect(html).toContain('xmlns="http://www.w3.org/1998/Math/MathML"');
