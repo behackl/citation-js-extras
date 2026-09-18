@@ -1,9 +1,22 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import Cite from "citation-js";
 import { MathProtector } from "./math.js";
-import type { BadgeConfig, BibEntry, BibliographyOptions, FormatOptions } from "./types.js";
+import type {
+  BadgeConfig,
+  BibEntry,
+  BibliographyOptions,
+  FormatDefaults,
+  FormatOptions,
+} from "./types.js";
 
-export type { BadgeConfig, BibEntry, BibliographyOptions, FormatOptions, MathRenderer } from "./types.js";
+export type {
+  BadgeConfig,
+  BibEntry,
+  BibliographyOptions,
+  FormatDefaults,
+  FormatOptions,
+  MathRenderer,
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Bibliography class
@@ -18,10 +31,17 @@ export class Bibliography {
 
   private readonly customFieldNames: string[];
   private readonly math?: MathProtector;
+  /** Formatting defaults from the constructor; each call may override them. */
+  private readonly formatDefaults: FormatDefaults;
 
   constructor(options: BibliographyOptions) {
     const bibData = maybeReadFile(options.data);
     this.customFieldNames = options.customFields ?? [];
+    this.formatDefaults = {
+      titleLink: options.titleLink,
+      badges: options.badges,
+      linkifyUrls: options.linkifyUrls,
+    };
 
     // Register CSL style
     this.templateName = this.registerStyle(options.cslStyle);
@@ -107,11 +127,37 @@ export class Bibliography {
    * Applies title linking and badge injection.
    */
   formatEntry(entry: BibEntry, options: FormatOptions = {}): string {
+    const merged = this.mergeOptions(options);
     const rendered = this.renderCslEntries([entry]);
     const raw = rendered[0]?.[1] ?? "";
     const innerHtml = unwrapCslEntry(raw) ?? raw.trim();
-    const decorated = this.decorateEntryHtml(entry, innerHtml, options);
-    return this.math ? this.math.restore(decorated, options.renderMath) : decorated;
+    const decorated = this.decorateEntryHtml(entry, innerHtml, merged);
+    return this.restoreMath(decorated, merged, entry);
+  }
+
+  /** Per-call options win over the defaults given to the constructor. */
+  private mergeOptions(options: FormatOptions): FormatOptions {
+    return {
+      ...options,
+      titleLink: options.titleLink ?? this.formatDefaults.titleLink,
+      badges: options.badges ?? this.formatDefaults.badges,
+      linkifyUrls: options.linkifyUrls ?? this.formatDefaults.linkifyUrls,
+    };
+  }
+
+  /**
+   * Restore protected math, naming the entry when a renderer rejects a formula.
+   * Without the citation key, `renderMath` failures are near-impossible to
+   * trace back to a line in the .bib file.
+   */
+  private restoreMath(html: string, options: FormatOptions, entry?: BibEntry): string {
+    if (!this.math) return html;
+    try {
+      return this.math.restore(html, options.renderMath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(entry ? `entry ${entry.key}: ${message}` : message, { cause: error });
+    }
   }
 
   /**
@@ -120,8 +166,9 @@ export class Bibliography {
   formatHtml(entries: BibEntry[], options: FormatOptions = {}): string {
     if (entries.length === 0) return "";
 
-    const tag = options.list ?? "ol";
-    const attrs = options.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
+    const merged = this.mergeOptions(options);
+    const tag = merged.list ?? "ol";
+    const attrs = merged.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
     const attrStr = renderAttributes(attrs);
 
     // Render all entries in one citeproc run so style-dependent numbering/state
@@ -137,17 +184,16 @@ export class Bibliography {
         ?? rendered[index]?.[1]
         ?? "";
       const innerRaw = unwrapCslEntry(raw) ?? raw.trim();
-      const inner = this.decorateEntryHtml(entry, innerRaw, options);
+      let inner = this.decorateEntryHtml(entry, innerRaw, merged);
+      // Linkify before restoring math: rendered MathML carries an xmlns URL
+      // that must not be turned into a link. Both steps run per entry so that
+      // a failing formula can be reported with its citation key.
+      if (merged.linkifyUrls !== false) inner = linkifyBareUrls(inner);
+      inner = this.restoreMath(inner, merged, entry);
       return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${inner}</${itemTag}>`;
     });
 
-    let html = `<${tag}${attrStr} class="csl-bib-body">\n${items.join("\n")}\n</${tag}>`;
-
-    if (options.linkifyUrls !== false) {
-      html = linkifyBareUrls(html);
-    }
-
-    return this.math ? this.math.restore(html, options.renderMath) : html;
+    return `<${tag}${attrStr} class="csl-bib-body">\n${items.join("\n")}\n</${tag}>`;
   }
 
   // -------------------------------------------------------------------------

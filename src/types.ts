@@ -51,6 +51,9 @@ export type MathRenderer = (tex: string, context: { display: boolean }) => strin
 
 /** Options passed to {@link Bibliography.formatHtml}. */
 export interface FormatOptions {
+  /**
+   * Values given here override the defaults passed to the constructor.
+   */
   /** Render protected math as trusted HTML; requires preserveMath at construction.
    * Without this callback, escaped original TeX delimiters are restored.
    */
@@ -109,8 +112,11 @@ export interface BibEntry {
   raw: Record<string, any>;
 }
 
+/** Formatting options that can be set once and overridden per call. */
+export type FormatDefaults = Pick<FormatOptions, "titleLink" | "badges" | "linkifyUrls">;
+
 /** Options for constructing a {@link Bibliography}. */
-export interface BibliographyOptions {
+export interface BibliographyOptions extends FormatDefaults {
   /** Preserve math in supported display-text fields before CSL conversion.
    * Opt-in; entries' CSL text contains internal placeholders until HTML formatting.
    * Raw/custom fields remain unchanged. Unclosed or empty math throws.

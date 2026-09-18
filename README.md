@@ -100,6 +100,40 @@ Restoration runs after title linking, badges, and URL linkification. Neither
 renderer output nor restored TeX is fed back through these HTML helpers. Disabling
 preservation (the default) retains the previous behavior.
 
+If `renderMath` throws, the error names the entry it came from
+(`entry doe:2024: Undefined control sequence: \\kk`), so a broken formula can be
+traced to a line in the `.bib` file.
+
+### Sanitizing formatted output
+
+Rendered mathematics does **not** survive an HTML sanitizer with default
+settings: KaTeX and MathJax output relies on `class`, `style` and MathML
+elements that `rehype-sanitize` strips, leaving empty boxes. Sanitize the
+citation HTML *first*, then insert the trusted renderer output:
+
+```js
+const math = [];
+const html = bib.formatHtml(entries, {
+  // Stand in for each formula while the HTML is sanitized ...
+  renderMath: (tex, { display }) => {
+    math.push(renderWithKatex(tex, display));
+    return `mathplaceholder${math.length - 1}end`;
+  },
+});
+const safe = sanitize(html);
+// ... then substitute the rendered markup back in.
+const final = safe.replace(/mathplaceholder(\d+)end/g, (_, i) => math[Number(i)]);
+```
+
+Two related gotchas when using `rehype-sanitize`:
+
+- its `defaultSchema` allows `className` only with an explicit value list *per
+  tag*, and that per-tag rule overrides anything added under `'*'`; to keep
+  badge or list classes, merge your class names into the existing entry for
+  that tag
+- pick a placeholder that cannot occur in your bibliography (append characters
+  until it is absent from the source)
+
 ## Development checks
 
 ```sh
@@ -125,6 +159,13 @@ Use Node 24 LTS for these development checks, matching CI and publishing.
 | `cslStyle` | `string?` | CSL style — a registered template name, raw XML, or a file path. Defaults to `'apa'`. |
 | `customFields` | `string[]?` | BibTeX field names to preserve. These appear on each entry under `.custom`. |
 | `preserveMath` | `boolean?` | Preserve math in display-text fields through CSL formatting. Defaults to `false`. |
+| `titleLink` | `string[]?` | Default for {@link FormatOptions.titleLink}. |
+| `badges` | `BadgeConfig[]?` | Default badge configuration, used by every `formatHtml`/`formatEntry` call. |
+| `linkifyUrls` | `boolean?` | Default for URL linkification. |
+
+`titleLink`, `badges` and `linkifyUrls` are usually the same for every call, so
+they can be set once here; a value passed to `formatHtml`/`formatEntry` overrides
+the default for that call.
 
 ### `bib.entries`
 
