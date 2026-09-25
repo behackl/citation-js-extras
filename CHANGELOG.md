@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-09-25)
 
 **Your own layout.** Pages can lay out entries however their design wants:
 the CSL style produces the lines (`display="block"`), `wrapVariable` marks
