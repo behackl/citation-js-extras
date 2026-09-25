@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import Cite from "citation-js";
+import CSL from "citeproc";
 import { MathProtector } from "./math.js";
 import type {
   BadgeConfig,
@@ -20,6 +21,44 @@ export type {
   MathRenderer,
 } from "./types.js";
 
+type Engine = InstanceType<typeof CSL.Engine>;
+
+/**
+ * The render call in progress. Engines are shared between instances (creating
+ * one compiles the style, which is slow), so their callbacks look up whoever is
+ * rendering right now. Rendering is synchronous, which makes this safe.
+ */
+let current: {
+  items: Map<string, Record<string, any>>;
+  wrap: (params: any, pre: string, str: string, post: string) => string;
+} | undefined;
+
+/** Engines by style and locale, like citation-js's own cache. */
+const engines = new Map<string, Engine>();
+const busy = new Set<Engine>();
+
+function createEngine(templateName: string, lang: string): Engine {
+  const { templates, locales } = Cite.plugins.config.get("@csl");
+  const engine = new CSL.Engine({
+    retrieveItem: (id) => {
+      const item = current?.items.get(id);
+      if (!item) throw new Error(`Cannot find entry with id '${id}'`);
+      return item;
+    },
+    retrieveLocale: (locale) => locales.get(locale) ?? locales.get(locale.replace("-", "_")) ?? {},
+    variableWrapper: (params, pre, str, post) => current ? current.wrap(params, pre, str, post) : pre + str + post,
+  }, templates.get(templateName), locales.has(lang) ? lang : undefined, true);
+  // As citation-js: DOIs and URLs are linked by us, not by citeproc.
+  engine.opt.development_extensions.wrap_url_and_doi = false;
+  return engine;
+}
+
+/** What the variable wrapper needs while citeproc renders one call's entries. */
+interface Rendering {
+  options: FormatOptions;
+  byId: Map<string, { entry: BibEntry; titleUrl: string | null; titleLinked: boolean }>;
+}
+
 // ---------------------------------------------------------------------------
 // Bibliography class
 // ---------------------------------------------------------------------------
@@ -35,6 +74,7 @@ export class Bibliography {
   private readonly math?: MathProtector;
   /** Formatting defaults from the constructor; each call may override them. */
   private readonly formatDefaults: FormatDefaults;
+  private rendering?: Rendering;
 
   constructor(options: BibliographyOptions) {
     const bibData = maybeReadFile(options.data);
@@ -138,25 +178,35 @@ export class Bibliography {
    */
   formatEntry(entry: BibEntry, options: FormatOptions = {}): string {
     const merged = this.mergeOptions(options);
-    const rendered = this.renderCslEntries([entry]);
-    const raw = rendered[0]?.[1] ?? "";
-    const innerHtml = unwrapCslEntry(raw) ?? raw.trim();
-    return this.buildEntryHtml(entry, innerHtml, merged);
+    const [html = ""] = this.renderItems([entry], merged);
+    return this.restoreMath(html, merged, entry);
   }
 
   /**
-   * Decorate, linkify and restore math for one rendered entry. Shared by
-   * `formatEntry` and `formatHtml` so both honour the same options.
-   *
-   * Linkification runs before math restoration: rendered MathML carries an
-   * xmlns URL that must not be turned into a link. Math is restored per entry
-   * so a failing formula can be reported with its citation key.
+   * Format a list of entries as a complete HTML bibliography.
    */
-  private buildEntryHtml(entry: BibEntry, innerRaw: string, merged: FormatOptions): string {
-    let inner = this.decorateEntryHtml(entry, innerRaw, merged);
-    if (merged.linkifyUrls !== false) inner = linkifyBareUrls(inner);
-    return this.restoreMath(inner, merged, entry);
+  formatHtml(entries: BibEntry[], options: FormatOptions = {}): string {
+    if (entries.length === 0) return "";
+
+    const merged = this.mergeOptions(options);
+    const tag = merged.list ?? "ol";
+    const attrs = merged.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
+    const attrStr = renderAttributes(withClass(attrs, "csl-bib-body"));
+    const itemTag = tag === "div" ? "div" : "li";
+
+    // Rendered in one citeproc run so style-dependent numbering/state
+    // (e.g. vancouver left-margin labels) remains correct.
+    const items = this.renderItems(entries, merged).map((inner, index) => {
+      const entry = entries[index]!;
+      return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${this.restoreMath(inner, merged, entry)}</${itemTag}>`;
+    });
+
+    return `<${tag}${attrStr}>\n${items.join("\n")}\n</${tag}>`;
   }
+
+  // -------------------------------------------------------------------------
+  // Private helpers
+  // -------------------------------------------------------------------------
 
   /** Per-call options win over the defaults given to the constructor. */
   private mergeOptions(options: FormatOptions): FormatOptions {
@@ -184,39 +234,65 @@ export class Bibliography {
   }
 
   /**
-   * Format a list of entries as a complete HTML bibliography.
+   * Entry HTML without wrapper, shared by `formatEntry` and `formatHtml` so
+   * both honour the same options.
    */
-  formatHtml(entries: BibEntry[], options: FormatOptions = {}): string {
-    if (entries.length === 0) return "";
+  private renderItems(entries: BibEntry[], options: FormatOptions): string[] {
+    const byId = new Map(entries.map(entry => [String(entry.csl.id ?? entry.key), {
+      entry,
+      titleUrl: typeof entry.csl.title === "string" && entry.csl.title.trim()
+        ? this.resolveTitleLink(entry, options.titleLink)
+        : null,
+      titleLinked: false,
+    }]));
+    this.rendering = { options, byId };
+    let rendered: Array<[string, string]>;
+    try {
+      rendered = this.renderCslEntries(entries.map(entry => entry.csl), "en-US");
+    } finally {
+      this.rendering = undefined;
+    }
+    const renderedMap = new Map<string, string>(rendered);
 
-    const merged = this.mergeOptions(options);
-    const tag = merged.list ?? "ol";
-    const attrs = merged.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
-    const attrStr = renderAttributes(withClass(attrs, "csl-bib-body"));
-
-    // Render all entries in one citeproc run so style-dependent numbering/state
-    // (e.g. vancouver left-margin labels) remains correct.
-    const rendered = this.renderCslEntries(entries);
-    const renderedMap = new Map<string, string>(rendered.map(([id, html]) => [id, html]));
-
-    const itemTag = tag === "div" ? "div" : "li";
-    const items = entries.map((entry, index) => {
+    return entries.map((entry, index) => {
       const id = String(entry.csl.id ?? entry.key);
-      const raw = renderedMap.get(id)
-        ?? renderedMap.get(entry.key)
-        ?? rendered[index]?.[1]
-        ?? "";
-      const innerRaw = unwrapCslEntry(raw) ?? raw.trim();
-      const inner = this.buildEntryHtml(entry, innerRaw, merged);
-      return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${inner}</${itemTag}>`;
+      const raw = renderedMap.get(id) ?? rendered[index]?.[1] ?? "";
+      const html = unwrapCslEntry(raw) ?? raw.trim();
+      const { titleUrl, titleLinked } = byId.get(id)!;
+      return this.decorate(entry, html, titleLinked ? null : titleUrl, options);
     });
-
-    return `<${tag}${attrStr}>\n${items.join("\n")}\n</${tag}>`;
   }
 
-  // -------------------------------------------------------------------------
-  // Private helpers
-  // -------------------------------------------------------------------------
+  /**
+   * Called by citeproc for every variable it renders. Everything the library
+   * adds to the citation text happens here, one variable at a time, instead of
+   * by searching the finished HTML:
+   *
+   * - the title link, around the exact output of the title variable, so no
+   *   quotes, markup or capitalisation the style applies can hide the title;
+   * - bare URLs in a variable (e.g. in a `note`) become links. Formulas are
+   *   still placeholders here, so MathML's xmlns URL is never linked.
+   */
+  private wrapVariable(params: { itemData?: Record<string, any>; variableNames?: string[]; context?: string; mode?: string },
+    pre: string, str: string, post: string): string {
+    const state = this.rendering;
+    const item = state?.byId.get(String(params.itemData?.id));
+    if (!state || !item || params.context !== "bibliography" || params.mode !== "html" || !str) {
+      return pre + str + post;
+    }
+    const variable = params.variableNames?.[0] ?? "";
+    let html = str;
+    // A style may print the title in another variable's place, e.g. APA
+    // substitutes it for missing authors; citeproc then doesn't call it `title`.
+    const isTitle = variable === "title"
+      || (typeof item.entry.csl.title === "string" && plainText(str) === plainText(item.entry.csl.title));
+    if (isTitle && item.titleUrl && !item.titleLinked) {
+      html = `<a href="${escapeAttr(item.titleUrl)}">${html}</a>`;
+      item.titleLinked = true;
+    }
+    if (state.options.linkifyUrls !== false) html = linkifyBareUrls(html);
+    return pre + html + post;
+  }
 
   private registerStyle(cslStyle?: string): string {
     if (!cslStyle) return "apa";
@@ -241,40 +317,48 @@ export class Bibliography {
     return name;
   }
 
-  private renderCslEntries(entries: BibEntry[]): Array<[string, string]> {
-    const cite = new Cite(entries.map((entry) => entry.csl));
-    const out = cite.format("bibliography", {
-      format: "html",
-      template: this.templateName,
-      lang: "en-US",
-      nosort: true,
-      asEntryArray: true,
-    }) as unknown;
+  /**
+   * Render entries with citeproc, as `cite.format("bibliography")` does, but
+   * through an engine that has our variable wrapper: citeproc only accepts it
+   * when the engine is created. Styles and locales come from citation-js's
+   * registries, and the data is prepared the same way.
+   */
+  private renderCslEntries(csl: Record<string, any>[], lang: string): Array<[string, string]> {
+    const data = Cite.util.downgradeCsl(csl);
+    const key = `${this.templateName}|${lang}`;
+    let engine = engines.get(key);
+    // citeproc is not re-entrant: a consumer function that formats with the
+    // same style while this engine renders gets an engine of its own.
+    if (!engine || busy.has(engine)) {
+      engine = createEngine(this.templateName, lang);
+      if (!engines.has(key)) engines.set(key, engine);
+    }
 
-    if (!Array.isArray(out)) return [];
-
-    return out
-      .filter((item): item is [unknown, unknown] => Array.isArray(item) && item.length >= 2)
-      .map(([id, html]) => [String(id), String(html)]);
+    const previous = current;
+    current = {
+      items: new Map(data.map(item => [String(item.id), item])),
+      wrap: (params, pre, str, post) => this.wrapVariable(params, pre, str, post),
+    };
+    busy.add(engine);
+    try {
+      engine.updateItems([]);
+      const ids = engine.updateItems(data.map(item => String(item.id)), true);
+      const bibliography = engine.makeBibliography();
+      if (!bibliography) return [];
+      return bibliography[1].map((html, index) => [String(ids[index]), html]);
+    } finally {
+      busy.delete(engine);
+      current = previous;
+    }
   }
 
-  private decorateEntryHtml(entry: BibEntry, html: string, options: FormatOptions): string {
+  /** The fallback title link and the badges; the title link itself is added by citeproc's wrapper. */
+  private decorate(entry: BibEntry, html: string, fallbackUrl: string | null, options: FormatOptions): string {
     let out = html;
-
-    // Link the title text
-    const titleUrl = this.resolveTitleLink(entry, options.titleLink);
-    const title = entry.csl.title;
-    if (titleUrl && typeof title === "string" && title.trim()) {
-      out = this.linkTitle(out, title, titleUrl);
-    }
-
-    // Append badges
-    const badges = options.badges ?? [];
-    const badgeHtml = this.renderBadges(entry, badges);
-    if (badgeHtml) {
-      out += ` ${badgeHtml}`;
-    }
-
+    // Never lose a link: a style that doesn't print the title gets its URL.
+    if (fallbackUrl) out += ` <a href="${escapeAttr(fallbackUrl)}">${escapeHtml(fallbackUrl)}</a>`;
+    const badgeHtml = this.renderBadges(entry, options.badges ?? []);
+    if (badgeHtml) out += ` ${badgeHtml}`;
     return out;
   }
 
@@ -303,48 +387,6 @@ export class Bibliography {
       }
     }
     return null;
-  }
-
-  private linkTitle(html: string, title: string, url: string): string {
-    const pattern = buildHtmlTextPattern(title);
-    if (!pattern) return html;
-
-    const regex = new RegExp(pattern);
-    const tokens = html.split(/(<[^>]*>)/g);
-
-    let insideAnchor = false;
-    let insideScript = false;
-    let insideStyle = false;
-    let linked = false;
-
-    const output: string[] = [];
-
-    for (const token of tokens) {
-      if (token.startsWith("<")) {
-        const lower = token.toLowerCase();
-        if (/^<a\b/.test(lower)) insideAnchor = true;
-        if (/^<\/a\b/.test(lower)) insideAnchor = false;
-        if (/^<script\b/.test(lower)) insideScript = true;
-        if (/^<\/script\b/.test(lower)) insideScript = false;
-        if (/^<style\b/.test(lower)) insideStyle = true;
-        if (/^<\/style\b/.test(lower)) insideStyle = false;
-        output.push(token);
-        continue;
-      }
-
-      if (linked || insideAnchor || insideScript || insideStyle) {
-        output.push(token);
-        continue;
-      }
-
-      const replaced = token.replace(regex, (match) => {
-        linked = true;
-        return `<a href="${escapeAttr(url)}">${match}</a>`;
-      });
-      output.push(replaced);
-    }
-
-    return output.join("");
   }
 
   private renderBadges(entry: BibEntry, badges: BadgeConfig[]): string {
@@ -476,34 +518,16 @@ function sanitizeUrl(url: string): string | null {
   return null;
 }
 
-function buildHtmlTextPattern(text: string): string {
-  let pattern = "";
-  for (const ch of text) {
-    switch (ch) {
-      case "&":
-        pattern += "(?:&amp;|&#38;)";
-        break;
-      case "<":
-        pattern += "&lt;";
-        break;
-      case ">":
-        pattern += "&gt;";
-        break;
-      case '"':
-        pattern += "(?:&quot;|&#34;)";
-        break;
-      case "'":
-        pattern += "(?:&#39;|&apos;)";
-        break;
-      default:
-        pattern += escapeRegex(ch);
-    }
-  }
-  return pattern;
-}
-
-function escapeRegex(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Visible text for comparing a rendered variable with a title: no tags, plain quotes, any case. */
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(?:amp|#38|#x26);/gi, "&")
+    .replace(/[\u2018\u2019]|&(?:#39|#x27|apos|rsquo|lsquo);/gi, "'")
+    .replace(/[\u201c\u201d\u201e]|&(?:quot|#34|#x22|ldquo|rdquo);/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function escapeAttr(s: string): string {

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /** Minimal BibTeX fixture with custom fields for testing. */
 export const SAMPLE_BIB = `
 @Article{doe-smith:2023:widgets,
@@ -57,3 +59,10 @@ export const SAMPLE_BIB = `
   zbl       = {7654.12345},
 }
 `;
+
+/**
+ * Invented publications in the shapes of real exports (see the file's header):
+ * biblatex/arXiv eprints, every DOI spelling, titles with quotes, markup, math
+ * and `&`, several projects per entry, no authors, software, relative URLs.
+ */
+export const REALISTIC_BIB = readFileSync(new URL("./realistic.bib", import.meta.url), "utf8");

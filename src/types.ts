@@ -99,9 +99,9 @@ export interface FormatOptions {
   listAttributes?: HtmlAttributes;
 
   /**
-   * Auto-linkify bare `http(s)://` URLs in the rendered output that aren't
-   * already inside `<a>`, `<script>`, or `<style>` tags.
-   * Overrides the constructor default, if any.
+   * Turn bare `http(s)://` URLs that the style prints (e.g. in a `note`) into
+   * links. Applied to each variable as citeproc renders it, never to text the
+   * style adds around variables. Overrides the constructor default, if any.
    *
    * @default true
    */

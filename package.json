@@ -63,5 +63,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "dependencies": {
+    "citeproc": "^2.4.6"
   }
 }

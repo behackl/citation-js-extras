@@ -37,7 +37,7 @@ describe("math preservation", () => {
     const html = bib.formatHtml(bib.entries, {
       renderMath: () => '<svg><text>https://example.org/math</text></svg>',
     });
-    expect(html).toContain('<a href="https://doi.org/10.1234/example">Estimate for <svg>');
+    expect(html).toMatch(/<a href="https:\/\/doi\.org\/10\.1234\/example">(?:<i>)?Estimate for <svg>/);
     expect(html).toContain('<text>https://example.org/math</text>');
     expect(html).not.toContain('<text><a');
   });

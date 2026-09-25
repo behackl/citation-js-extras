@@ -54,7 +54,7 @@ describe("Citation.js → protected math → MathJax SVG", () => {
       const renderMath = renderer();
       const html = bib.formatHtml(bib.entries, { renderMath });
       expect(html).toContain("Müller");
-      expect(html).toContain('<a href="https://doi.org/10.1234/example">Estimate for <mjx-container');
+      expect(html).toMatch(/<a href="https:\/\/doi\.org\/10\.1234\/example">(?:<i>)?Estimate for <mjx-container/);
       expect(html.match(/<mjx-container\b/g)).toHaveLength(1);
       expect(html).toContain('<svg');
       expect(html).toContain('<path');
