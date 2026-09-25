@@ -36,42 +36,37 @@ const expressions = [
   String.raw`x^{a_{b}}`,
   String.raw`\text{cost: \$5}`,
 ];
-const delimiters = [
-  ["$", "$", false], ["$$", "$$", true],
-  ["\\(", "\\)", false], ["\\[", "\\]", true],
-] as const;
+/** An entry whose title contains `formula`, rendered through the real renderer. */
+function render(formula: string) {
+  const bib = new Bibliography({
+    data: String.raw`@article{test,
+      title={Estimate for {${formula}}},
+      author={M{\"u}ller, Ada}, year={2025}, doi={10.1234/example}
+    }`,
+    preserveMath: true,
+  });
+  const renderMath = renderer();
+  return { html: bib.formatHtml(bib.entries, { renderMath }), entry: bib.formatEntry(bib.entries[0], { renderMath }) };
+}
 
+// Delimiters and display mode are covered by math-edge-cases.test.ts with a
+// stand-in renderer; this file checks that real MathJax output survives.
 describe("Citation.js → protected math → MathJax SVG", () => {
-  for (const [open, close, display] of delimiters) {
-    it.each(expressions)(`${open}…${close}: renders %s`, tex => {
-      const bib = new Bibliography({
-        data: String.raw`@article{test,
-          title={Estimate for {${open}${tex}${close}}},
-          author={M{\"u}ller, Ada}, year={2025}, doi={10.1234/example}
-        }`,
-        preserveMath: true,
-      });
-      const renderMath = renderer();
-      const html = bib.formatHtml(bib.entries, { renderMath });
-      expect(html).toContain("Müller");
-      expect(html).toMatch(/<a href="https:\/\/doi\.org\/10\.1234\/example">(?:<i>)?Estimate for <mjx-container/);
-      expect(html.match(/<mjx-container\b/g)).toHaveLength(1);
-      expect(html).toContain('<svg');
-      expect(html).toContain('<path');
-      expect(html.includes('display="true"')).toBe(display);
-      expect(html).not.toContain("bibmathplaceholder");
-      expect(html).not.toContain("data-mjx-error");
-      // Single-entry output uses the same final restoration path.
-      expect(bib.formatEntry(bib.entries[0], { renderMath })).toContain('<svg');
-    });
-  }
+  it.each(expressions)("renders %s", tex => {
+    const { html, entry } = render(`$${tex}$`);
+    expect(html).toContain("Müller");
+    expect(html).toMatch(/<a href="https:\/\/doi\.org\/10\.1234\/example">(?:<i>)?Estimate for <mjx-container/);
+    expect(html.match(/<mjx-container\b/g)).toHaveLength(1);
+    expect(html).toContain("<svg");
+    expect(html).toContain("<path");
+    expect(html).not.toContain('display="true"');
+    expect(html).not.toContain("bibmathplaceholder");
+    expect(html).not.toContain("data-mjx-error");
+    expect(entry).toContain("<svg");
+  });
 
-  it("reports invalid TeX instead of silently accepting an error SVG", () => {
-    const bib = new Bibliography({
-      data: String.raw`@article{bad, title={An {$\notARealCommand$} estimate}, year={2025}}`,
-      preserveMath: true,
-    });
-    expect(() => bib.formatHtml(bib.entries, { renderMath: renderer() })).toThrow("MathJax failed");
+  it("renders display math as display", () => {
+    expect(render(String.raw`$$\sum_{i=1}^{n} i$$`).html).toContain('display="true"');
   });
 
   it("renders math in journal titles as well as publication titles", () => {

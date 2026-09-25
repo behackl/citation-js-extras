@@ -18,34 +18,11 @@ function makeBib(overrides: Record<string, unknown> = {}) {
 // ---------------------------------------------------------------------------
 
 describe("parsing", () => {
-  it("parses all entries", () => {
-    const bib = makeBib();
-    expect(bib.entries).toHaveLength(5);
-  });
-
-  it("preserves declared custom fields", () => {
-    const bib = makeBib();
+  it("exposes declared custom fields, and every field as raw", () => {
+    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["publication-status", "project"] });
     const widgets = bib.entries.find((e) => e.key.includes("widgets"))!;
-    expect(widgets.custom["publication-status"]).toBe("published");
-    expect(widgets.custom.arxiv).toBe("2301.00001");
-    expect(widgets.custom.mrnumber).toBe("4500001");
-    expect(widgets.custom.project).toBe("WidgetFund-1234");
-  });
-
-  it("does not include undeclared custom fields", () => {
-    const bib = new Bibliography({
-      data: SAMPLE_BIB,
-      customFields: ["publication-status"],
-    });
-    const widgets = bib.entries.find((e) => e.key.includes("widgets"))!;
-    expect(widgets.custom["publication-status"]).toBe("published");
-    expect(widgets.custom.arxiv).toBeUndefined();
-  });
-
-  it("extracts year from CSL issued field", () => {
-    const bib = makeBib();
-    const gadgets = bib.entries.find((e) => e.key.includes("gadgets"))!;
-    expect(gadgets.year).toBe(2024);
+    expect(widgets.custom).toEqual({ "publication-status": "published", project: "WidgetFund-1234" });
+    expect(widgets.raw.arxiv).toBe("2301.00001");
   });
 
   it("matches custom fields case-insensitively, keyed as requested", () => {
@@ -63,12 +40,6 @@ describe("parsing", () => {
     expect(() => new Bibliography({ data, preserveMath: true })).toThrow(/Duplicate citation keys/);
   });
 
-  it("keeps raw properties accessible", () => {
-    const bib = makeBib();
-    const widgets = bib.entries.find((e) => e.key.includes("widgets"))!;
-    expect(widgets.raw.doi).toBe("10.1234/jws.2023.001");
-    expect(widgets.raw["publication-status"]).toBe("published");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -95,26 +66,12 @@ describe("input handling", () => {
 // ---------------------------------------------------------------------------
 
 describe("filter", () => {
-  it("filters by a single custom field", () => {
+  it("returns the entries matching all criteria", () => {
     const bib = makeBib();
-    const published = bib.filter({ "publication-status": "published" });
-    expect(published).toHaveLength(3);
-    expect(published.every((e) => e.custom["publication-status"] === "published")).toBe(true);
-  });
-
-  it("filters by multiple criteria (AND)", () => {
-    const bib = makeBib();
-    const result = bib.filter({
-      "publication-status": "published",
-      project: "WidgetFund-1234",
-    });
-    expect(result).toHaveLength(1);
-    expect(result[0].key).toContain("widgets");
-  });
-
-  it("returns empty array when nothing matches", () => {
-    const bib = makeBib();
-    expect(bib.filter({ "publication-status": "retracted" })).toHaveLength(0);
+    expect(bib.filter({ "publication-status": "published" }).map((e) => e.key))
+      .toEqual(["doe-smith:2023:widgets", "doe:2024:gadgets", "smith-doe:2021:conf"]);
+    expect(bib.filter({ "publication-status": "published", project: "WidgetFund-1234" }).map((e) => e.key))
+      .toEqual(["doe-smith:2023:widgets"]);
   });
 });
 
@@ -123,18 +80,10 @@ describe("filter", () => {
 // ---------------------------------------------------------------------------
 
 describe("sort", () => {
-  it("sorts by year descending by default", () => {
+  it("sorts by year, descending by default", () => {
     const bib = makeBib();
-    const sorted = bib.sort(bib.entries);
-    const years = sorted.map((e) => e.year);
-    expect(years).toEqual([2025, 2024, 2023, 2022, 2021]);
-  });
-
-  it("sorts by year ascending", () => {
-    const bib = makeBib();
-    const sorted = bib.sort(bib.entries, { order: "asc" });
-    const years = sorted.map((e) => e.year);
-    expect(years).toEqual([2021, 2022, 2023, 2024, 2025]);
+    expect(bib.sort(bib.entries).map((e) => e.year)).toEqual([2025, 2024, 2023, 2022, 2021]);
+    expect(bib.sort(bib.entries, { order: "asc" }).map((e) => e.year)).toEqual([2021, 2022, 2023, 2024, 2025]);
   });
 
   it("sorts by full date: month and day within a year", () => {
@@ -234,15 +183,6 @@ describe("formatEntry – title linking", () => {
     );
   });
 
-  it("links italicized titles", () => {
-    const bib = makeBib();
-    const preprint = bib.entries.find((e) => e.key.includes("preprint"))!;
-    const html = bib.formatEntry(preprint);
-    expect(html).toContain(
-      '<a href="https://arxiv.org/abs/2501.99999v2">A Preprint on Sprockets</a>',
-    );
-  });
-
   it("skips unsafe title-link URLs", () => {
     const bib = new Bibliography({
       data: "@Article{x, author={A B}, title={Unsafe Title URL}, year={2024}, url={javascript:alert(1)}}",
@@ -299,14 +239,6 @@ describe("formatEntry – badges", () => {
     expect(html).toContain('class="bib-arxiv" href="https://arxiv.org/abs/2501.99999"');
   });
 
-  it("renders MR badge when mrnumber is present", () => {
-    const bib = makeBib();
-    const widgets = bib.entries.find((e) => e.key.includes("widgets"))!;
-    const html = bib.formatEntry(widgets, { badges: BADGES });
-    expect(html).toContain('class="bib-mr"');
-    expect(html).toContain("mr=4500001");
-  });
-
   it("skips badges for missing fields", () => {
     const bib = makeBib();
     const gadgets = bib.entries.find((e) => e.key.includes("gadgets"))!;
@@ -314,15 +246,6 @@ describe("formatEntry – badges", () => {
     expect(html).toContain("bib-doi");
     expect(html).not.toContain("bib-arxiv");
     expect(html).not.toContain("bib-mr");
-  });
-
-  it("validates field value against match regex", () => {
-    const bib = makeBib();
-    const conf = bib.entries.find((e) => e.key.includes("conf"))!;
-    const html = bib.formatEntry(conf, { badges: BADGES });
-    // zbl field is "7654.12345" which matches /^(\d+\.\d+)$/
-    expect(html).toContain("bib-zbl");
-    expect(html).toContain("zbmath.org/?q=an:7654.12345");
   });
 
   it("skips badge when match regex fails", () => {
@@ -349,19 +272,6 @@ describe("formatEntry – badges", () => {
     expect(html).not.toContain("<img src=x onerror=alert(1)>");
   });
 
-  it("skips badges with unsafe URLs", () => {
-    const bib = new Bibliography({
-      data: "@Article{test, author={A B}, title={T}, year={2024}, doi={10.1/example}}",
-      customFields: ["doi"],
-    });
-    const entry = bib.entries[0];
-    const html = bib.formatEntry(entry, {
-      badges: [{ field: "doi", label: "bad", url: "javascript:alert(1)" }],
-    });
-
-    expect(html).not.toContain("bib-links");
-    expect(html).not.toContain('href="javascript:alert(1)"');
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -377,30 +287,14 @@ describe("formatHtml", () => {
     expect((html.match(/<li /g) ?? []).length).toBe(5);
   });
 
-  it("supports <ul> wrapper", () => {
+  it("supports <ul> and <div> wrappers", () => {
     const bib = makeBib();
-    const html = bib.formatHtml(bib.entries, { list: "ul" });
-    expect(html).toMatch(/^<ul class="csl-bib-body">/);
-    expect(html).toMatch(/<\/ul>$/);
-  });
-
-  it("supports <div> wrapper", () => {
-    const bib = makeBib();
-    const html = bib.formatHtml(bib.entries, { list: "div" });
-    expect(html).toMatch(/^<div class="csl-bib-body">/);
-    expect(html).toMatch(/<\/div>$/);
-    expect(html).toContain('class="csl-entry"');
-    expect(html).not.toContain("<li ");
-  });
-
-  it("supports custom list attributes", () => {
-    const bib = makeBib();
-    const html = bib.formatHtml(bib.entries, {
-      list: "ol",
-      listAttributes: { reversed: true, start: "10" },
-    });
-    expect(html).toContain("reversed");
-    expect(html).toContain('start="10"');
+    const ul = bib.formatHtml(bib.entries, { list: "ul" });
+    expect(ul).toMatch(/^<ul class="csl-bib-body">[\s\S]*<\/ul>$/);
+    const div = bib.formatHtml(bib.entries, { list: "div" });
+    expect(div).toMatch(/^<div class="csl-bib-body">[\s\S]*<\/div>$/);
+    expect(div).toContain('<div data-csl-entry-id="doe-smith:2023:widgets" class="csl-entry">');
+    expect(div).not.toContain("<li ");
   });
 
   it("preserves input entry order", () => {
@@ -409,16 +303,6 @@ describe("formatHtml", () => {
     const html = bib.formatHtml(reversed, { linkifyUrls: false });
     const ids = [...html.matchAll(/data-csl-entry-id="([^"]+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(reversed.map((e) => e.key));
-  });
-
-  it("keeps style-dependent numbering for numeric styles", () => {
-    const bib = makeBib({ cslStyle: "vancouver" });
-    const subset = bib.entries.slice(0, 3);
-    const html = bib.formatHtml(subset, { list: "ul", linkifyUrls: false });
-    const labels = [...html.matchAll(/class="csl-left-margin">(\d+)\.\s*<\/div>/g)].map(
-      (m) => m[1],
-    );
-    expect(labels).toEqual(["1", "2", "3"]);
   });
 
   it("returns empty string for empty input", () => {

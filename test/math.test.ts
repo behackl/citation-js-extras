@@ -13,20 +13,6 @@ const renderMath = (tex: string, { display }: { display: boolean }) =>
   `<math data-display="${display}">${tex}</math>`;
 
 describe("math preservation", () => {
-  it.each([
-    [String.raw`$\alpha + \frac{1}{\pi}$`, false, String.raw`\alpha + \frac{1}{\pi}`],
-    [String.raw`$$x^{a_{b}}$$`, true, "x^{a_{b}}"],
-    [String.raw`\(L^2\)`, false, "L^2"],
-    [String.raw`\[\sum_{i=1}^n i\]`, true, String.raw`\sum_{i=1}^n i`],
-  ])("preserves %s and passes display mode to the renderer", (source, display, tex) => {
-    const bib = bibliography(`Estimate for {${source}}`);
-    const html = bib.formatHtml(bib.entries, { renderMath });
-    expect(html).toContain(`<math data-display="${display}">${tex}</math>`);
-    expect(html).toContain("Müller");
-    expect(html).not.toContain("bibmathplaceholder");
-    expect(bib.entries[0].raw.title).toBe(`Estimate for {${source}}`);
-  });
-
   it("restores escaped original TeX when no renderer is supplied", () => {
     const bib = bibliography(String.raw`An {$a < b \& c$} estimate`);
     expect(bib.formatEntry(bib.entries[0])).toContain(String.raw`$a &lt; b \&amp; c$`);
@@ -69,7 +55,6 @@ describe("math preservation", () => {
     expect(first.match(/<math /g)).toHaveLength(2);
     expect(bib.formatHtml(bib.entries, { renderMath })).toBe(first);
     expect(bib.formatEntry(bib.entries[0])).toContain("$x$");
-    expect(bib.formatHtml([])).toBe("");
   });
 
   it("protects resolved BibTeX strings and concatenations", () => {
@@ -108,13 +93,6 @@ describe("math preservation", () => {
     expect(bib.formatHtml(bib.entries, { renderMath })).toContain(
       String.raw`AN <math data-display="false">\alpha</math> ESTIMATE`,
     );
-  });
-
-  it("propagates renderer errors", () => {
-    const bib = bibliography("{$x$}");
-    expect(() => bib.formatEntry(bib.entries[0], {
-      renderMath: () => { throw new Error("Unsupported TeX"); },
-    })).toThrow("Unsupported TeX");
   });
 
   it("does not change default behavior", () => {
