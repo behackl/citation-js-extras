@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A style for a page that lays out each entry itself: one block per line
+     (authors, title, details). Used by test/layout.test.ts. -->
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" demote-non-dropping-particle="sort-only">
+  <info>
+    <title>Layout test: one line per block</title>
+    <id>test-layout</id>
+    <updated>2026-01-01T00:00:00+00:00</updated>
+  </info>
+  <macro name="year">
+    <date variable="issued"><date-part name="year"/></date>
+  </macro>
+  <macro name="details">
+    <choose>
+      <if type="article-journal">
+        <group delimiter=", ">
+          <text variable="container-title"/>
+          <group delimiter=" "><text term="volume" form="short"/><text variable="volume"/></group>
+          <text variable="page"/>
+          <text macro="year"/>
+        </group>
+      </if>
+      <else-if type="paper-conference chapter" match="any">
+        <group delimiter=", ">
+          <group delimiter=" "><text term="in"/><text variable="container-title"/></group>
+          <text variable="page"/>
+          <text macro="year"/>
+        </group>
+      </else-if>
+      <!-- Anything else: its details, with the year only next to them, so a
+           preprint gets no details line (the page shows the year already). -->
+      <else-if variable="container-title genre version publisher" match="any">
+        <group delimiter=", ">
+          <text variable="container-title"/>
+          <text variable="genre"/>
+          <text variable="version"/>
+          <text variable="publisher"/>
+          <text macro="year"/>
+        </group>
+      </else-if>
+    </choose>
+  </macro>
+  <citation>
+    <layout><text variable="title"/></layout>
+  </citation>
+  <bibliography>
+    <layout>
+      <names variable="author" display="block" font-weight="bold">
+        <name and="text" delimiter=", "/>
+      </names>
+      <text variable="title" display="block" font-style="italic"/>
+      <text macro="details" display="block"/>
+    </layout>
+  </bibliography>
+</style>

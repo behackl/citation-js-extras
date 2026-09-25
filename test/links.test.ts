@@ -204,6 +204,16 @@ describe("badge functions and relative URLs", () => {
       .toContain('<a href="/projects/beta/">T</a>');
   });
 
+  it("computes a class per value", () => {
+    const b = new Bibliography({ data: "@article{k, title={T}, year={2024}, Project={Beta, Alpha}}" });
+    const html = b.formatEntry(b.entries[0]!, {
+      badges: [{ field: "project", split: ",", label: v => v, url: v => `#${v}`, className: "project" }],
+      linkAttributes: link => link.kind === "badge" ? { class: `project-${link.value.toLowerCase()}` } : {},
+    });
+    expect(html).toContain('<a class="project project-beta" href="#Beta">Beta</a>');
+    expect(html).toContain('<a class="project project-alpha" href="#Alpha">Alpha</a>');
+  });
+
   it("applies match to each split value and accepts a pattern", () => {
     const b = new Bibliography({ data: "@article{k, title={T}, year={2024}, projects={P-1 and X and P-2}}" });
     const html = b.formatEntry(b.entries[0]!, {

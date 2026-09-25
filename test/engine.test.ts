@@ -70,4 +70,16 @@ describe("own engine, same output as citation-js", () => {
     vancouver.formatHtml(vancouver.entries);
     expect(apa.formatHtml(apa.entries)).toBe(before);
   });
+
+  it("lets a function called during rendering format with the same style", () => {
+    // citeproc is not re-entrant; the nested call must get an engine of its own.
+    const bib = new Bibliography({ data: SAMPLE_BIB, cslStyle: "apa" });
+    const [first, second] = bib.entries;
+    const alone = bib.formatEntry(second!);
+    const html = bib.formatEntry(first!, {
+      wrapVariable: (inner, { variable }) => variable === "title" ? `${inner} [see also: ${bib.formatEntry(second!)}]` : inner,
+    });
+    expect(html).toContain(`[see also: ${alone}]`);
+    expect(bib.formatEntry(second!)).toBe(alone);
+  });
 });

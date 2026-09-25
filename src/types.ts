@@ -64,7 +64,10 @@ export interface BadgeConfig {
    * empty ones skipped; `match`, `label` and `url` apply to each value.
    */
   split?: string | RegExp;
-  /** CSS class name(s) for the badge `<a>` element. */
+  /**
+   * CSS class name(s) for the badge `<a>` element. For classes that depend on
+   * the value or the entry, use {@link FormatOptions.linkAttributes}.
+   */
   className?: string;
 }
 
@@ -89,7 +92,7 @@ export interface Link {
   entry: BibEntry;
 }
 
-/** The links of one entry: its title link and badges. */
+/** The links of one entry, as returned by `Bibliography.links`. */
 export interface EntryLinks {
   title?: Link;
   badges: Link[];
@@ -176,6 +179,29 @@ export interface FormatOptions {
   sanitize?: (html: string) => string;
 
   /**
+   * Leave the badges out of the HTML, e.g. to render them yourself from
+   * `bib.links(entry)`. They are still withheld from the style.
+   *
+   * @default true
+   */
+  appendBadges?: boolean;
+
+  /**
+   * Extra attributes for every link the library writes: the title link, the
+   * badges, and the fallback title URL. A `class` is added to the badge's
+   * `className`; an `href` replaces the URL (it must still be `http(s)`,
+   * `mailto` or relative, or the link is dropped).
+   */
+  linkAttributes?: (link: Link) => HtmlAttributes;
+
+  /**
+   * Wrap the rendered HTML of each CSL variable in the bibliography (and the
+   * title outside its link), e.g. to mark it for CSS:
+   * `(html, { variable }) => '<span data-csl-variable="' + variable + '">' + html + '</span>'`.
+   */
+  wrapVariable?: (html: string, context: { variable: string; entry: BibEntry }) => string;
+
+  /**
    * Locale for the CSL style's terms and dates. citation-js ships `en-US`,
    * `de-DE`, `fr-FR`, `es-ES` and `nl-NL`.
    *
@@ -217,7 +243,8 @@ export interface BibEntry {
 export type FormatDefaults = Pick<
   FormatOptions,
   | "titleLink" | "badges" | "linkifyUrls" | "itemAttributes" | "badgeListClassName"
-  | "printLinkedIdentifiers" | "sanitize" | "lang"
+  | "printLinkedIdentifiers" | "sanitize" | "lang" | "appendBadges" | "linkAttributes"
+  | "wrapVariable"
 >;
 
 /** Options for constructing a {@link Bibliography}. */

@@ -44,11 +44,23 @@ try {
   assert.equal(Object.keys(packed.exports["."])[0], "types");
 
   writeFileSync(join(temp, "consumer.ts"), `
-import { Bibliography, type MathRenderer, type BibliographyOptions } from "@behackl/citation-js-extras";
-const options: BibliographyOptions = { data: "@article{a,title={Test {$x$}},year={2025}}", preserveMath: true };
+import {
+  Bibliography, badgePresets, type BadgeConfig, type BibliographyOptions, type EntryLinks, type Link,
+  type MathRenderer,
+} from "@behackl/citation-js-extras";
+const options: BibliographyOptions = { data: "@article{a,title={Test {$x$}},year={2025}}", preserveMath: true, lang: "de-DE" };
 const bib = new Bibliography(options);
 const renderMath: MathRenderer = (tex, { display }) => display ? tex : tex;
-const html: string = bib.formatHtml(bib.entries, { renderMath });
+const badges: BadgeConfig[] = [
+  { ...badgePresets.doi, className: "badge" },
+  { field: "project", label: value => value, url: (value, entry) => "/projects/" + value + "#" + entry.key },
+];
+const html: string = bib.formatHtml(bib.sort(bib.entries, { by: "date" }), {
+  renderMath, badges, sanitize: input => input, itemAttributes: entry => ({ id: entry.key }),
+  linkAttributes: (link: Link) => ({ class: link.kind }), appendBadges: false,
+  wrapVariable: (inner, { variable }) => "<span data-v=" + variable + ">" + inner + "</span>",
+});
+const links: EntryLinks = bib.links(bib.entries[0]);
 const entry: string = bib.formatEntry(bib.entries[0], { renderMath });
 `);
   // Exercise both Node and bundler resolution against the published exports.
@@ -91,6 +103,12 @@ assert(html.includes("<svg"));
 assert(html.includes("<path"));
 assert(!html.includes("data-mjx-error"));
 assert(!html.includes("bibmathplaceholder"));
+// Math is inserted after sanitizing: the sanitizer never sees SVG.
+const sanitized = bib.formatHtml(bib.entries, {
+  renderMath: (tex, { display }) => adaptor.outerHTML(document.convert(tex, { display })),
+  sanitize: input => { assert(!input.includes("<svg")); return input; },
+});
+assert(sanitized.includes("<svg"));
 console.log("Packed consumer: public ESM import + MathJax SVG PASS");
 `);
   execFileSync(process.execPath, ["consumer.mjs"], { cwd: temp, stdio: "inherit", timeout: 30_000 });

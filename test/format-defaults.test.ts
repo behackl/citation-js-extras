@@ -56,8 +56,11 @@ describe("every formatting option can be set on the constructor", () => {
   const withDoi = { badges: [{ ...BADGES[0]!, className: undefined }] };
   const cases: Array<[string, Record<string, unknown>, (html: string) => boolean]> = [
     ["printLinkedIdentifiers", { printLinkedIdentifiers: true }, html => html.includes(">https://doi.org/10.5678/gr.2024.003</a>")],
+    ["appendBadges", { ...withDoi, appendBadges: false }, html => !html.includes("bib-links")],
     ["badgeListClassName", { ...withDoi, badgeListClassName: "links" }, html => html.includes('<span class="links">')],
     ["itemAttributes", { itemAttributes: () => ({ "data-x": "1" }) }, html => html.includes('data-x="1"')],
+    ["linkAttributes", { linkAttributes: () => ({ class: "l" }) }, html => html.includes('<a class="l" href=')],
+    ["wrapVariable", { wrapVariable: (inner: string) => `<w>${inner}</w>` }, html => html.includes("<w>")],
     ["sanitize", { sanitize: () => "clean" }, html => html === "clean"],
     ["lang", { lang: "de-DE" }, html => html.includes("(Hrsg.)")],
   ];

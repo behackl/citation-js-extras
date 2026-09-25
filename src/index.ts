@@ -18,9 +18,11 @@ export type {
   BadgeFunction,
   BibEntry,
   BibliographyOptions,
+  EntryLinks,
   FormatDefaults,
   FormatOptions,
   HtmlAttributes,
+  Link,
   MathRenderer,
 } from "./types.js";
 
@@ -67,7 +69,8 @@ const DEFAULT_TITLE_LINK = ["url", "doi", "arxiv"];
 
 const FORMAT_DEFAULT_KEYS = [
   "titleLink", "badges", "linkifyUrls", "itemAttributes", "badgeListClassName",
-  "printLinkedIdentifiers", "sanitize", "lang",
+  "printLinkedIdentifiers", "sanitize", "lang", "appendBadges", "linkAttributes",
+  "wrapVariable",
 ] as const satisfies readonly (keyof FormatDefaults)[];
 
 type Engine = InstanceType<typeof CSL.Engine>;
@@ -249,7 +252,7 @@ export class Bibliography {
     const items = this.renderItems(entries, merged).map((inner, index) => {
       const entry = entries[index]!;
       const attributes = withClass(
-        { "data-csl-entry-id": entry.key, ...merged.itemAttributes?.(entry) },
+        { "data-csl-entry-id": entry.key, ...(merged.itemAttributes && attributed(entry, () => merged.itemAttributes!(entry))) },
         "csl-entry",
       );
       return `<${itemTag}${renderAttributes(attributes)}>${inner}</${itemTag}>`;
@@ -257,6 +260,15 @@ export class Bibliography {
 
     const list = `<${tag}${renderAttributes(withClass(listAttributes, "csl-bib-body"))}>\n${items.join("\n")}\n</${tag}>`;
     return this.finish(list, merged);
+  }
+
+  /**
+   * The links an entry gets with these options: its title link and badges.
+   * The same resolution the formatted HTML uses, so the two always agree; for
+   * rendering badges yourself, pair it with `appendBadges: false`.
+   */
+  links(entry: BibEntry, options: FormatOptions = {}): EntryLinks {
+    return this.resolveLinks(entry, this.mergeOptions(options));
   }
 
   // -------------------------------------------------------------------------
@@ -309,7 +321,8 @@ export class Bibliography {
    * - the title link, around the exact output of the title variable, so no
    *   quotes, markup or capitalisation the style applies can hide the title;
    * - bare URLs in a variable (e.g. in a `note`) become links. Formulas are
-   *   still placeholders here, so MathML's xmlns URL is never linked.
+   *   still placeholders here, so MathML's xmlns URL is never linked;
+   * - the consumer's `wrapVariable`, outermost.
    */
   private wrapVariable(params: { itemData?: Record<string, any>; variableNames?: string[]; context?: string; mode?: string },
     pre: string, str: string, post: string): string {
@@ -325,10 +338,12 @@ export class Bibliography {
     const isTitle = variable === "title"
       || (typeof item.entry.csl.title === "string" && plainText(str) === plainText(item.entry.csl.title));
     if (isTitle && item.links.title && !item.titleLinked) {
-      html = linkHtml(item.links.title, html);
+      html = linkHtml(item.links.title, html, state.options);
       item.titleLinked = true;
     }
     if (state.options.linkifyUrls !== false) html = linkifyBareUrls(html);
+    const wrap = state.options.wrapVariable;
+    if (wrap) html = attributed(item.entry, () => wrap(html, { variable, entry: item.entry }));
     return pre + html + post;
   }
 
@@ -501,10 +516,14 @@ function applyBadge(entry: BibEntry, badge: BadgeConfig): Array<{ value: string;
 
     const { url: template, label } = badge;
     const url = safeUrl(typeof template === "function"
-      ? template(matched, entry)
+      ? attributed(entry, () => template(matched, entry))
       : template.replace(/\$1/g, () => matched));
     if (!url) return [];
-    return [{ value: matched, url, label: String(typeof label === "function" ? label(matched, entry) : label) }];
+    return [{
+      value: matched,
+      url,
+      label: String(typeof label === "function" ? attributed(entry, () => label(matched, entry)) : label),
+    }];
   });
 }
 
@@ -559,17 +578,26 @@ function displayCsl(csl: Record<string, any>, withheld: string[]): Record<string
 function decorate(html: string, titleLinked: boolean, links: EntryLinks, options: FormatOptions): string {
   let out = html;
   // Never lose a link: a style that doesn't print the title gets its URL.
-  if (links.title && !titleLinked) out += ` ${linkHtml(links.title, escapeHtml(links.title.url))}`;
-  if (links.badges.length) {
-    const badges = links.badges.map(link => linkHtml(link, escapeHtml(link.label ?? "")));
+  if (links.title && !titleLinked) out += ` ${linkHtml(links.title, escapeHtml(links.title.url), options)}`;
+  if (links.badges.length && options.appendBadges !== false) {
+    const badges = links.badges.map(link => linkHtml(link, escapeHtml(link.label ?? ""), options));
     out += ` <span class="${escapeAttr(options.badgeListClassName ?? "bib-links")}">${badges.join(" ")}</span>`;
   }
   return out;
 }
 
-/** Every `<a>` the library writes. */
-function linkHtml(link: Link, inner: string): string {
-  return `<a${renderAttributes({ ...(link.className ? { class: link.className } : {}), href: link.url })}>${inner}</a>`;
+/**
+ * Every `<a>` the library writes. `linkAttributes` may add attributes, add a
+ * class, or replace the URL; a replaced URL is checked like any other, and an
+ * unsafe one leaves the text unlinked.
+ */
+function linkHtml(link: Link, inner: string, options: FormatOptions): string {
+  const extra = options.linkAttributes ? attributed(link.entry, () => options.linkAttributes!(link)) : {};
+  const { class: extraClass, href, ...rest } = extra;
+  const url = typeof href === "string" ? safeUrl(href) : link.url;
+  if (!url) return inner;
+  const className = [link.className, typeof extraClass === "string" ? extraClass : ""].filter(Boolean).join(" ");
+  return `<a${renderAttributes({ ...(className ? { class: className } : {}), href: url, ...rest })}>${inner}</a>`;
 }
 
 /** Visible text for comparing a rendered variable with a title: no tags, plain quotes, any case. */
@@ -582,6 +610,17 @@ function plainText(html: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+/** Run a consumer function, naming the entry if it throws. */
+function attributed<T>(entry: BibEntry, fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith(`entry ${entry.key}: `)) throw error;
+    throw new Error(`entry ${entry.key}: ${message}`, { cause: error });
+  }
 }
 
 // ---------------------------------------------------------------------------
