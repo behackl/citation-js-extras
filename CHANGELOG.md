@@ -2,6 +2,18 @@
 
 ## 0.3.0 (unreleased)
 
+**Your own layout.** Pages can lay out entries however their design wants:
+the CSL style produces the lines (`display="block"`), `wrapVariable` marks
+their parts for CSS, and `bib.links(entry)` hands over the title link and
+badges as data, to render as router links or wherever the design puts them.
+Nothing needs parsing, nothing needs reimplementing. See
+[Laying out entries yourself](docs/layout.md#laying-out-entries-yourself).
+
+**Links, printed once.** Titles are linked exactly, and a DOI or URL that is
+linked is no longer printed again as text by the style. BibTeX from Zotero,
+JabRef, biblatex or arXiv works as exported: DOIs in any spelling, arXiv ids in
+`eprint`.
+
 ### Added
 
 - `badgePresets` for DOI, arXiv, MathSciNet and zbMATH, accepting the
