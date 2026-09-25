@@ -39,6 +39,33 @@
   link.
 - Errors from functions you pass in name the entry they occurred for.
 
-## 0.2.1 and earlier
+## 0.2.1 (2026-09-18)
 
-See the [git history](https://github.com/behackl/citation-js-extras/commits/main).
+### Added
+
+- `titleLink`, `badges` and `linkifyUrls` can be given to the constructor as
+  defaults for every call.
+- A `renderMath` error names the entry the formula came from.
+
+### Fixed
+
+- `formatEntry` ignored `linkifyUrls`; only `formatHtml` applied it. Both now
+  linkify bare URLs by default. Pass `linkifyUrls: false` if you relied on
+  `formatEntry` leaving them alone.
+
+## 0.2.0 (2026-09-06)
+
+### Added
+
+- `preserveMath` keeps TeX in titles intact through the formatting, for
+  `renderMath` (MathJax, KaTeX, …) or for typesetting in the browser.
+
+### Fixed
+
+- TypeScript declarations resolve under both NodeNext and Bundler resolution.
+
+## 0.1.0 (2026-02-17)
+
+First release: custom BibTeX fields that citation-js drops are kept on each
+entry; `filter` and `sort`; `formatHtml` and `formatEntry` with any CSL style,
+linked titles and configurable badges; `linkifyBareUrls`.
