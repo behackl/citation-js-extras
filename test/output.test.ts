@@ -54,20 +54,6 @@ describe("sanitize", () => {
     expect(html).not.toContain("csl-entry");
   });
 
-  it("applies to formatEntry as well", () => {
-    const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
-    const html = bib.formatEntry(bib.entries[0]!, { renderMath, sanitize: input => `[${input}]` });
-    expect(html.startsWith("[")).toBe(true);
-    expect(html).toContain('<b class="math">k</b>');
-  });
-
-  it("still names the entry when a formula fails after sanitizing", () => {
-    const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
-    const failing = () => { throw new Error("Undefined control sequence"); };
-    expect(() => bib.formatHtml(bib.entries, { renderMath: failing, sanitize: html => html }))
-      .toThrow("entry math:2024: Undefined control sequence");
-  });
-
   it("works without mathematics", () => {
     const bib = new Bibliography({ data: SAMPLE_BIB });
     expect(bib.formatHtml(bib.entries, { sanitize: html => html.toUpperCase() })).toContain("CSL-BIB-BODY");

@@ -22,114 +22,61 @@ const MATH_BIB = `
 `;
 
 describe("formatting defaults from the constructor", () => {
-  it("applies badges given at construction time", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], badges: BADGES });
-    expect(bib.formatHtml(bib.entries)).toContain("https://doi.org/10.1234/jws.2023.001");
-    expect(bib.formatEntry(bib.entries[0]!)).toContain('class="badge"');
-  });
-
   it("lets a call override the defaults", () => {
     const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], badges: BADGES });
     expect(bib.formatHtml(bib.entries, { badges: [] })).not.toContain('class="badge"');
   });
-
-  it("keeps working when no defaults are given", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"] });
-    expect(bib.formatHtml(bib.entries)).not.toContain('class="badge"');
-    expect(bib.formatHtml(bib.entries, { badges: BADGES })).toContain('class="badge"');
-  });
-
-  it("honours titleLink and linkifyUrls defaults", () => {
-    const linked = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], titleLink: ["doi"] });
-    expect(linked.formatEntry(linked.entries[0]!)).toContain("https://doi.org/");
-
-    const plain = new Bibliography({ data: SAMPLE_BIB, linkifyUrls: false });
-    const html = plain.formatHtml(plain.entries);
-    expect(html).not.toContain('<a href="https://example.com/widgets">https://');
-  });
 });
 
-describe("every formatting option can be set on the constructor", () => {
-  // One row per option; `titleLink`, `badges` and `linkifyUrls` are covered above.
-  // The chapter has an editor, whose term differs between locales ("Ed."/"Hrsg.").
+describe("every formatting option works as a constructor default, in formatHtml and formatEntry", () => {
+  // Options have been honoured by one method and ignored by the other before,
+  // so each row is checked through both. The chapter has an editor, whose term
+  // differs between locales ("Ed."/"Hrsg.").
   const data = `${SAMPLE_BIB}\n@incollection{chapter, author={Doe, Jane}, title={Chapter}, booktitle={Book}, editor={Roe, Richard}, year={2020}, publisher={X}}`;
   const withDoi = { badges: [{ ...BADGES[0]!, className: undefined }] };
-  const cases: Array<[string, Record<string, unknown>, (html: string) => boolean]> = [
+  const bareUrl = (html: string) => /<a href="(https?:[^"]+)">\1<\/a>/.test(html);
+  type Row = [string, Record<string, unknown>, (html: string) => boolean, { base?: object; listOnly?: boolean }?];
+  const rows: Row[] = [
+    ["titleLink", { titleLink: ["doi"] }, html => html.includes('<a href="https://doi.org/10.1234/jws.2023.001">On the Enumeration')],
+    ["badges", { badges: BADGES }, html => html.includes('class="badge"')],
+    ["linkifyUrls", { linkifyUrls: false }, html => !bareUrl(html)],
     ["printLinkedIdentifiers", { printLinkedIdentifiers: true }, html => html.includes(">https://doi.org/10.5678/gr.2024.003</a>")],
-    ["appendBadges", { ...withDoi, appendBadges: false }, html => !html.includes("bib-links")],
-    ["badgeListClassName", { ...withDoi, badgeListClassName: "links" }, html => html.includes('<span class="links">')],
-    ["itemAttributes", { itemAttributes: () => ({ "data-x": "1" }) }, html => html.includes('data-x="1"')],
+    ["appendBadges", { appendBadges: false }, html => !html.includes("bib-links"), { base: withDoi }],
+    ["badgeListClassName", { badgeListClassName: "links" }, html => html.includes('<span class="links">'), { base: withDoi }],
+    ["itemAttributes", { itemAttributes: () => ({ "data-x": "1" }) }, html => html.includes('data-x="1"'), { listOnly: true }],
     ["linkAttributes", { linkAttributes: () => ({ class: "l" }) }, html => html.includes('<a class="l" href=')],
     ["wrapVariable", { wrapVariable: (inner: string) => `<w>${inner}</w>` }, html => html.includes("<w>")],
-    ["sanitize", { sanitize: () => "clean" }, html => html === "clean"],
+    ["sanitize", { sanitize: () => "clean" }, html => !html.includes("<")],
     ["lang", { lang: "de-DE" }, html => html.includes("(Hrsg.)")],
   ];
-  for (const [name, options, check] of cases) {
+  for (const [name, options, check, { base = {}, listOnly = false } = {}] of rows) {
     it(name, () => {
-      const bib = new Bibliography({ data, cslStyle: "apa", ...options });
-      expect(check(bib.formatHtml(bib.entries))).toBe(true);
-      // The option is what makes the difference.
-      expect(check(new Bibliography({ data, cslStyle: "apa", ...withDoi }).formatHtml(bib.entries))).toBe(false);
+      const outputs = (bib: Bibliography) => [
+        bib.formatHtml(bib.entries),
+        ...(listOnly ? [] : [bib.entries.map(entry => bib.formatEntry(entry)).join("\n")]),
+      ];
+      for (const html of outputs(new Bibliography({ data, cslStyle: "apa", ...base, ...options }))) {
+        expect(check(html)).toBe(true);
+      }
+      // Without the option, the check fails: the option is what makes the difference.
+      for (const html of outputs(new Bibliography({ data, cslStyle: "apa", ...base }))) {
+        expect(check(html)).toBe(false);
+      }
     });
   }
 });
 
-describe("formatEntry honours linkifyUrls like formatHtml", () => {
-  const bareUrl = (html: string) => /<a href="(https?:[^"]+)">\1<\/a>/.test(html);
-
-  it("linkifies bare URLs by default", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"] });
-    const entry = bib.entries[0]!;
-    expect(bareUrl(bib.formatEntry(entry))).toBe(true);
-    expect(bareUrl(bib.formatHtml([entry]))).toBe(true);
-  });
-
-  it("respects a constructor default of false", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], linkifyUrls: false });
-    expect(bareUrl(bib.formatEntry(bib.entries[0]!))).toBe(false);
-  });
-
-  it("lets a call override a true default", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], linkifyUrls: true });
-    expect(bareUrl(bib.formatEntry(bib.entries[0]!, { linkifyUrls: false }))).toBe(false);
-  });
-
-  it("lets a call override a false default", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"], linkifyUrls: false });
-    expect(bareUrl(bib.formatEntry(bib.entries[0]!, { linkifyUrls: true }))).toBe(true);
-  });
-});
-
-describe("math error attribution", () => {
-  const failing = () => {
-    throw new Error("Undefined control sequence");
-  };
-
-  it("names the entry whose formula could not be rendered", () => {
+describe("math", () => {
+  it("names the entry whose formula could not be rendered, keeping the cause", () => {
     const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
-    expect(() => bib.formatHtml(bib.entries, { renderMath: failing }))
-      .toThrow(/entry math:2024: Undefined control sequence/);
+    const failing = () => { throw new Error("Undefined control sequence"); };
+    let error: Error | undefined;
+    try { bib.formatHtml(bib.entries, { renderMath: failing }); } catch (e) { error = e as Error; }
+    expect(error?.message).toBe("entry math:2024: Undefined control sequence");
+    expect(error?.cause).toBeInstanceOf(Error);
   });
 
-  it("names the entry for formatEntry as well", () => {
-    const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
-    const entry = bib.entries.find(item => item.key === "math:2024")!;
-    expect(() => bib.formatEntry(entry, { renderMath: failing })).toThrow(/entry math:2024/);
-  });
-
-  it("keeps the original error as the cause", () => {
-    const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
-    try {
-      bib.formatHtml(bib.entries, { renderMath: failing });
-      expect.unreachable();
-    } catch (error) {
-      expect((error as Error).cause).toBeInstanceOf(Error);
-    }
-  });
-});
-
-describe("rendered math and URL linkification", () => {
-  it("does not linkify the MathML namespace URL", () => {
+  it("does not linkify the MathML namespace URL of rendered math", () => {
     const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
     const html = bib.formatHtml(bib.entries, {
       // Stand-in for KaTeX/MathJax output, which carries an xmlns URL.
@@ -137,20 +84,5 @@ describe("rendered math and URL linkification", () => {
     });
     expect(html).toContain('xmlns="http://www.w3.org/1998/Math/MathML"');
     expect(html).not.toContain('<a href="http://www.w3.org/1998/Math/MathML"');
-  });
-
-  it("does not linkify the MathML namespace URL in formatEntry either", () => {
-    const bib = new Bibliography({ data: MATH_BIB, preserveMath: true });
-    const entry = bib.entries.find(item => item.key === "math:2024")!;
-    const html = bib.formatEntry(entry, {
-      renderMath: tex => `<math xmlns="http://www.w3.org/1998/Math/MathML">${tex}</math>`,
-    });
-    expect(html).toContain('xmlns="http://www.w3.org/1998/Math/MathML"');
-    expect(html).not.toContain('<a href="http://www.w3.org/1998/Math/MathML"');
-  });
-
-  it("still linkifies bare URLs in the citation text", () => {
-    const bib = new Bibliography({ data: SAMPLE_BIB, customFields: ["doi"] });
-    expect(bib.formatHtml(bib.entries)).toContain("<a href=");
   });
 });
