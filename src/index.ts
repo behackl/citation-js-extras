@@ -7,6 +7,7 @@ import type {
   BibliographyOptions,
   FormatDefaults,
   FormatOptions,
+  HtmlAttributes,
 } from "./types.js";
 
 export type {
@@ -15,6 +16,7 @@ export type {
   BibliographyOptions,
   FormatDefaults,
   FormatOptions,
+  HtmlAttributes,
   MathRenderer,
 } from "./types.js";
 
@@ -51,8 +53,15 @@ export class Bibliography {
     const rawEntries: { type: string; label: string; properties: Record<string, any> }[] =
       plugins.input.chainLink(bibData);
     const rawMap = new Map<string, Record<string, any>>();
+    const duplicates = new Set<string>();
     for (const entry of rawEntries) {
+      if (rawMap.has(entry.label)) duplicates.add(entry.label);
       rawMap.set(entry.label, entry.properties);
+    }
+    // Raw fields are merged by key, so a duplicate would silently give one
+    // entry the other's fields.
+    if (duplicates.size) {
+      throw new Error(`Duplicate citation key${duplicates.size > 1 ? "s" : ""}: ${[...duplicates].join(", ")}`);
     }
 
     // Protect resolved raw fields, after BibTeX strings/concatenations are parsed
@@ -70,7 +79,8 @@ export class Bibliography {
         const raw = rawMap.get(key) ?? {};
         const custom: Record<string, string> = {};
         for (const f of this.customFieldNames) {
-          if (raw[f] != null) custom[f] = String(raw[f]);
+          const value = raw[f.toLowerCase()] ?? raw[f];
+          if (value != null) custom[f] = String(value);
         }
         return {
           csl,
@@ -182,7 +192,7 @@ export class Bibliography {
     const merged = this.mergeOptions(options);
     const tag = merged.list ?? "ol";
     const attrs = merged.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
-    const attrStr = renderAttributes(attrs);
+    const attrStr = renderAttributes(withClass(attrs, "csl-bib-body"));
 
     // Render all entries in one citeproc run so style-dependent numbering/state
     // (e.g. vancouver left-margin labels) remains correct.
@@ -201,7 +211,7 @@ export class Bibliography {
       return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${inner}</${itemTag}>`;
     });
 
-    return `<${tag}${attrStr} class="csl-bib-body">\n${items.join("\n")}\n</${tag}>`;
+    return `<${tag}${attrStr}>\n${items.join("\n")}\n</${tag}>`;
   }
 
   // -------------------------------------------------------------------------
@@ -509,7 +519,14 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function renderAttributes(attrs: Record<string, string | boolean>): string {
+/** Add a class to the attributes, after any the caller gave. */
+function withClass(attrs: HtmlAttributes, className: string): HtmlAttributes {
+  const { class: extra, ...rest } = attrs;
+  const classes = [typeof extra === "string" ? extra : "", className].filter(Boolean).join(" ");
+  return { ...rest, class: classes };
+}
+
+function renderAttributes(attrs: HtmlAttributes): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(attrs)) {
     if (v === true) parts.push(k);

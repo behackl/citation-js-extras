@@ -46,6 +46,9 @@ export interface BadgeConfig {
   className?: string;
 }
 
+/** HTML attributes; `true` renders a valueless attribute, `false` omits it. */
+export type HtmlAttributes = Record<string, string | boolean>;
+
 /** Synchronous renderer returning trusted HTML. Sanitize untrusted renderer output. */
 export type MathRenderer = (tex: string, context: { display: boolean }) => string;
 
@@ -88,11 +91,12 @@ export interface FormatOptions {
 
   /**
    * HTML attributes for the wrapper element (e.g. `{ reversed: true }`).
-   * Boolean `true` renders as a valueless attribute.
+   * Boolean `true` renders as a valueless attribute. A `class` is added to
+   * `csl-bib-body`.
    *
    * @default { reversed: true }  (when list is 'ol')
    */
-  listAttributes?: Record<string, string | boolean>;
+  listAttributes?: HtmlAttributes;
 
   /**
    * Auto-linkify bare `http(s)://` URLs in the rendered output that aren't
@@ -157,7 +161,8 @@ export interface BibliographyOptions extends FormatDefaults {
   /**
    * BibTeX field names to preserve through the citation-js pipeline.
    * These are extracted from the raw BibTeX parse and made available on
-   * each {@link BibEntry} under `.custom`.
+   * each {@link BibEntry} under `.custom`, keyed as given here. Matching is
+   * case-insensitive, like BibTeX: `archivePrefix` finds `archiveprefix`.
    *
    * Common examples: `['publication-status', 'arxiv', 'mrnumber', 'project']`.
    */

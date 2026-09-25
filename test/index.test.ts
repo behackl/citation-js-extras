@@ -48,6 +48,21 @@ describe("parsing", () => {
     expect(gadgets.year).toBe(2024);
   });
 
+  it("matches custom fields case-insensitively, keyed as requested", () => {
+    const bib = new Bibliography({
+      data: "@article{k, title={T}, year={2024}, pubStatus={published}, archivePrefix={arXiv}}",
+      customFields: ["pubStatus", "archivePrefix"],
+    });
+    expect(bib.entries[0]!.custom).toEqual({ pubStatus: "published", archivePrefix: "arXiv" });
+  });
+
+  it("rejects duplicate citation keys instead of mixing their fields", () => {
+    const data = "@article{a, title={First}, year={2024}}\n@article{a, title={Second}, year={2023}}\n"
+      + "@article{b, title={B1}, year={2022}}\n@article{b, title={B2}, year={2021}}";
+    expect(() => new Bibliography({ data })).toThrow("Duplicate citation keys: a, b");
+    expect(() => new Bibliography({ data, preserveMath: true })).toThrow(/Duplicate citation keys/);
+  });
+
   it("keeps raw properties accessible", () => {
     const bib = makeBib();
     const widgets = bib.entries.find((e) => e.key.includes("widgets"))!;
