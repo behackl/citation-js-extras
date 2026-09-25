@@ -145,6 +145,20 @@ export interface FormatOptions {
   listAttributes?: HtmlAttributes;
 
   /**
+   * Extra HTML attributes for each entry's `<li>`/`<div>` in `formatHtml`,
+   * e.g. to add anchors: `(entry) => ({ id: 'pub-' + entry.key })`. A `class` is added to
+   * `csl-entry`.
+   */
+  itemAttributes?: (entry: BibEntry) => HtmlAttributes;
+
+  /**
+   * Class of the `<span>` wrapping an entry's badges.
+   *
+   * @default 'bib-links'
+   */
+  badgeListClassName?: string;
+
+  /**
    * Also let the CSL style print identifiers that are already linked. By
    * default, the field used for the title link and the field of every rendered
    * badge are withheld from the style, so a DOI or URL is not printed again
@@ -153,6 +167,21 @@ export interface FormatOptions {
    * @default false
    */
   printLinkedIdentifiers?: boolean;
+
+  /**
+   * Sanitize the finished HTML. Runs while formulas are still placeholders, so
+   * `renderMath` output is inserted afterwards and never passes through the
+   * sanitizer (see "Sanitizing formatted output" in the README).
+   */
+  sanitize?: (html: string) => string;
+
+  /**
+   * Locale for the CSL style's terms and dates. citation-js ships `en-US`,
+   * `de-DE`, `fr-FR`, `es-ES` and `nl-NL`.
+   *
+   * @default 'en-US'
+   */
+  lang?: string;
 
   /**
    * Turn bare `http(s)://` URLs that the style prints (e.g. in a `note`) into
@@ -186,7 +215,9 @@ export interface BibEntry {
  * by the options of an individual `formatHtml`/`formatEntry` call.
  */
 export type FormatDefaults = Pick<
-  FormatOptions, "titleLink" | "badges" | "linkifyUrls" | "printLinkedIdentifiers"
+  FormatOptions,
+  | "titleLink" | "badges" | "linkifyUrls" | "itemAttributes" | "badgeListClassName"
+  | "printLinkedIdentifiers" | "sanitize" | "lang"
 >;
 
 /** Options for constructing a {@link Bibliography}. */

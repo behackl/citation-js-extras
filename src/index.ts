@@ -66,7 +66,8 @@ export const badgePresets = Object.freeze({
 const DEFAULT_TITLE_LINK = ["url", "doi", "arxiv"];
 
 const FORMAT_DEFAULT_KEYS = [
-  "titleLink", "badges", "linkifyUrls", "printLinkedIdentifiers",
+  "titleLink", "badges", "linkifyUrls", "itemAttributes", "badgeListClassName",
+  "printLinkedIdentifiers", "sanitize", "lang",
 ] as const satisfies readonly (keyof FormatDefaults)[];
 
 type Engine = InstanceType<typeof CSL.Engine>;
@@ -197,20 +198,23 @@ export class Bibliography {
   }
 
   /**
-   * Return a sorted **copy** of the given entries.
+   * Return a sorted **copy** of the given entries. Ties keep their input order.
    *
    * @param entries - entries to sort (not mutated)
-   * @param by - `'year'` (default) or a custom field name
+   * @param by - `'year'` (default), `'date'` (year, then month, then day; a
+   *   missing part counts as 0), or a custom field name
    * @param order - `'desc'` (default) or `'asc'`
    */
   sort(
     entries: BibEntry[],
-    { by = "year", order = "desc" }: { by?: string; order?: "asc" | "desc" } = {},
+    { by = "year", order = "desc" }: { by?: "year" | "date" | (string & {}); order?: "asc" | "desc" } = {},
   ): BibEntry[] {
+    const keyOf = (e: BibEntry): Array<number | string> =>
+      by === "year" ? [e.year ?? 0]
+      : by === "date" ? issuedParts(e)
+      : [e.custom[by] ?? ""];
     return [...entries].sort((a, b) => {
-      const va = by === "year" ? (a.year ?? 0) : (a.custom[by] ?? "");
-      const vb = by === "year" ? (b.year ?? 0) : (b.custom[by] ?? "");
-      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+      const cmp = compareKeys(keyOf(a), keyOf(b));
       return order === "desc" ? -cmp : cmp;
     });
   }
@@ -226,7 +230,7 @@ export class Bibliography {
   formatEntry(entry: BibEntry, options: FormatOptions = {}): string {
     const merged = this.mergeOptions(options);
     const [html = ""] = this.renderItems([entry], merged);
-    return this.restoreMath(html, merged, entry);
+    return this.finish(html, merged);
   }
 
   /**
@@ -244,10 +248,15 @@ export class Bibliography {
     // (e.g. vancouver left-margin labels) remains correct.
     const items = this.renderItems(entries, merged).map((inner, index) => {
       const entry = entries[index]!;
-      return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${this.restoreMath(inner, merged, entry)}</${itemTag}>`;
+      const attributes = withClass(
+        { "data-csl-entry-id": entry.key, ...merged.itemAttributes?.(entry) },
+        "csl-entry",
+      );
+      return `<${itemTag}${renderAttributes(attributes)}>${inner}</${itemTag}>`;
     });
 
-    return `<${tag}${renderAttributes(withClass(listAttributes, "csl-bib-body"))}>\n${items.join("\n")}\n</${tag}>`;
+    const list = `<${tag}${renderAttributes(withClass(listAttributes, "csl-bib-body"))}>\n${items.join("\n")}\n</${tag}>`;
+    return this.finish(list, merged);
   }
 
   // -------------------------------------------------------------------------
@@ -278,7 +287,7 @@ export class Bibliography {
     this.rendering = { options, byId };
     let rendered: Array<[string, string]>;
     try {
-      rendered = this.renderCslEntries(csl, "en-US");
+      rendered = this.renderCslEntries(csl, options.lang ?? "en-US");
     } finally {
       this.rendering = undefined;
     }
@@ -288,7 +297,7 @@ export class Bibliography {
       const id = String(entry.csl.id ?? entry.key);
       const raw = renderedMap.get(id) ?? rendered[index]?.[1] ?? "";
       let html = unwrapCslEntry(raw) ?? raw.trim();
-      return decorate(html, byId.get(id)!.titleLinked, links[index]!);
+      return decorate(html, byId.get(id)!.titleLinked, links[index]!, options);
     });
   }
 
@@ -323,19 +332,10 @@ export class Bibliography {
     return pre + html + post;
   }
 
-  /**
-   * Restore protected math, naming the entry when a renderer rejects a formula.
-   * Without the citation key, `renderMath` failures are near-impossible to
-   * trace back to a line in the .bib file.
-   */
-  private restoreMath(html: string, options: FormatOptions, entry?: BibEntry): string {
-    if (!this.math) return html;
-    try {
-      return this.math.restore(html, options.renderMath);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(entry ? `entry ${entry.key}: ${message}` : message, { cause: error });
-    }
+  /** Sanitize while formulas are placeholders, then insert rendered math. */
+  private finish(html: string, options: FormatOptions): string {
+    const safe = options.sanitize ? options.sanitize(html) : html;
+    return this.math ? this.math.restore(safe, options.renderMath) : safe;
   }
 
   private resolveLinks(entry: BibEntry, options: FormatOptions): EntryLinks {
@@ -556,13 +556,13 @@ function displayCsl(csl: Record<string, any>, withheld: string[]): Record<string
 }
 
 /** The fallback title link and the badges; the title link itself is added by citeproc's wrapper. */
-function decorate(html: string, titleLinked: boolean, links: EntryLinks): string {
+function decorate(html: string, titleLinked: boolean, links: EntryLinks, options: FormatOptions): string {
   let out = html;
   // Never lose a link: a style that doesn't print the title gets its URL.
   if (links.title && !titleLinked) out += ` ${linkHtml(links.title, escapeHtml(links.title.url))}`;
   if (links.badges.length) {
     const badges = links.badges.map(link => linkHtml(link, escapeHtml(link.label ?? "")));
-    out += ` <span class="bib-links">${badges.join(" ")}</span>`;
+    out += ` <span class="${escapeAttr(options.badgeListClassName ?? "bib-links")}">${badges.join(" ")}</span>`;
   }
   return out;
 }
@@ -629,6 +629,23 @@ function safeUrl(url: string): string | null {
   if (/^(?:https?:\/\/|mailto:)/i.test(trimmed)) return trimmed;
   if (/^(?:\/|\.\.?\/|#|\?)/.test(trimmed)) return trimmed;
   return null;
+}
+
+/** `[year, month, day]` from CSL `issued`; missing parts are 0. */
+function issuedParts(entry: BibEntry): number[] {
+  const parts = entry.csl.issued?.["date-parts"]?.[0];
+  if (!Array.isArray(parts)) return [entry.year ?? 0, 0, 0];
+  return [0, 1, 2].map(index => Number(parts[index]) || 0);
+}
+
+function compareKeys(a: Array<number | string>, b: Array<number | string>): number {
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x < y) return -1;
+    if (x > y) return 1;
+  }
+  return 0;
 }
 
 /** Add a class to the attributes, after any the caller gave. */

@@ -39,7 +39,7 @@ const undecorated = { titleLink: [], badges: [], linkifyUrls: false };
 
 describe("own engine, same output as citation-js", () => {
   const cases: Array<[string, string]> = [
-    ["apa", "en-US"], ["vancouver", "en-US"], ["harvard1", "en-US"], [BLOCKS, "en-US"],
+    ["apa", "en-US"], ["vancouver", "en-US"], ["harvard1", "en-US"], ["apa", "de-DE"], [BLOCKS, "en-US"],
   ];
   for (const [style, lang] of cases) {
     it(`${style.startsWith("<") ? "a block style" : style} (${lang})`, () => {

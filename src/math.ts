@@ -7,7 +7,8 @@ const TEXT_FIELDS = new Set([
   "journalsubtitle", "journal", "note", "annote", "abstract", "howpublished",
 ]);
 
-interface Expression { tex: string; display: boolean; source: string }
+/** `key` is the first entry the formula occurs in, for error messages. */
+interface Expression { tex: string; display: boolean; source: string; key: string }
 
 export class MathProtector {
   private readonly expressions = new Map<string, Expression>();
@@ -24,11 +25,12 @@ export class MathProtector {
     return Object.fromEntries(Object.entries(properties).map(([field, value]) => [
       field,
       TEXT_FIELDS.has(field) && typeof value === "string"
-        ? this.scan(value, `${key}.${field}`) : value,
+        ? this.scan(value, key, field) : value,
     ]));
   }
 
-  private scan(value: string, context: string): string {
+  private scan(value: string, key: string, field: string): string {
+    const context = `${key}.${field}`;
     let out = "";
     for (let i = 0; i < value.length;) {
       const opener = value.startsWith("$$", i) ? "$$"
@@ -56,7 +58,7 @@ export class MathProtector {
       if (!token) {
         token = `${this.prefix}${this.expressions.size}end`;
         this.tokensBySource.set(source, token);
-        this.expressions.set(token, { tex, source, display: opener === "$$" || opener === "\\[" });
+        this.expressions.set(token, { tex, source, key, display: opener === "$$" || opener === "\\[" });
       }
       out += token;
       i = end + closer.length;
@@ -64,15 +66,23 @@ export class MathProtector {
     return out;
   }
 
+  /**
+   * Replace placeholders in text (never in attribute values). A renderer error
+   * is rethrown naming the entry, so it can be traced to the .bib file.
+   */
   restore(html: string, render?: MathRenderer): string {
     const pattern = new RegExp(`${this.prefix}\\d+end`, "gi");
-    // Only replace text, never attribute values. Renderer output is inserted last.
     return html.split(/(<[^>]*>)/g).map(part => part.startsWith("<") ? part
       : part.replace(pattern, token => {
         const expression = this.expressions.get(token.toLowerCase());
         if (!expression) throw new Error(`Unknown math placeholder: ${token}`);
-        return render ? render(expression.tex, { display: expression.display })
-          : escapeHtml(expression.source);
+        if (!render) return escapeHtml(expression.source);
+        try {
+          return render(expression.tex, { display: expression.display });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`entry ${expression.key}: ${message}`, { cause: error });
+        }
       })).join("");
   }
 }

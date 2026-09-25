@@ -137,6 +137,25 @@ describe("sort", () => {
     expect(years).toEqual([2021, 2022, 2023, 2024, 2025]);
   });
 
+  it("sorts by full date: month and day within a year", () => {
+    const bib = new Bibliography({
+      data: [
+        "@misc{jan, title={Jan}, year={2024}, month={jan}}",
+        "@misc{year-only, title={Year}, year={2024}}",
+        "@misc{nov, title={Nov}, year={2024}, month={nov}}",
+        "@misc{older, title={Older}, year={2023}, month={dec}}",
+        "@misc{mar, title={Mar}, year={2024}, month={mar}}",
+        "@misc{mar-too, title={Mar too}, year={2024}, month={mar}}",
+      ].join("\n"),
+    });
+    const keys = (order: "asc" | "desc") => bib.sort(bib.entries, { by: "date", order }).map((e) => e.key);
+    // Ties keep input order in both directions.
+    expect(keys("desc")).toEqual(["nov", "mar", "mar-too", "jan", "year-only", "older"]);
+    expect(keys("asc")).toEqual(["older", "year-only", "jan", "mar", "mar-too", "nov"]);
+    // `year` is unchanged: file order within a year.
+    expect(bib.sort(bib.entries).map((e) => e.key)).toEqual(["jan", "year-only", "nov", "mar", "mar-too", "older"]);
+  });
+
   it("does not mutate the input array", () => {
     const bib = makeBib();
     const original = [...bib.entries];

@@ -49,6 +49,28 @@ describe("formatting defaults from the constructor", () => {
   });
 });
 
+describe("every formatting option can be set on the constructor", () => {
+  // One row per option; `titleLink`, `badges` and `linkifyUrls` are covered above.
+  // The chapter has an editor, whose term differs between locales ("Ed."/"Hrsg.").
+  const data = `${SAMPLE_BIB}\n@incollection{chapter, author={Doe, Jane}, title={Chapter}, booktitle={Book}, editor={Roe, Richard}, year={2020}, publisher={X}}`;
+  const withDoi = { badges: [{ ...BADGES[0]!, className: undefined }] };
+  const cases: Array<[string, Record<string, unknown>, (html: string) => boolean]> = [
+    ["printLinkedIdentifiers", { printLinkedIdentifiers: true }, html => html.includes(">https://doi.org/10.5678/gr.2024.003</a>")],
+    ["badgeListClassName", { ...withDoi, badgeListClassName: "links" }, html => html.includes('<span class="links">')],
+    ["itemAttributes", { itemAttributes: () => ({ "data-x": "1" }) }, html => html.includes('data-x="1"')],
+    ["sanitize", { sanitize: () => "clean" }, html => html === "clean"],
+    ["lang", { lang: "de-DE" }, html => html.includes("(Hrsg.)")],
+  ];
+  for (const [name, options, check] of cases) {
+    it(name, () => {
+      const bib = new Bibliography({ data, cslStyle: "apa", ...options });
+      expect(check(bib.formatHtml(bib.entries))).toBe(true);
+      // The option is what makes the difference.
+      expect(check(new Bibliography({ data, cslStyle: "apa", ...withDoi }).formatHtml(bib.entries))).toBe(false);
+    });
+  }
+});
+
 describe("formatEntry honours linkifyUrls like formatHtml", () => {
   const bareUrl = (html: string) => /<a href="(https?:[^"]+)">\1<\/a>/.test(html);
 
