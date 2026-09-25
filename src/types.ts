@@ -26,14 +26,30 @@
  * { field: 'zbl', label: 'zbMATH',
  *   url: 'https://zbmath.org/?q=an:$1',
  *   match: /^(\d{4}\.\d{5})$/ }
+ *
+ * @example
+ * // Functions for what a template can't express, e.g. a site-relative link:
+ * { field: 'project', label: (code) => code,
+ *   url: (code) => `/projects/${code.toLowerCase()}/` }
  */
 export interface BadgeConfig {
-  /** BibTeX field name to read the value from. */
+  /**
+   * BibTeX field to read, case-insensitively. A field named like an eprint
+   * archive (`arxiv`, `hal`, ...) also reads `eprint` when `eprinttype` or
+   * `archivePrefix` names that archive.
+   */
   field: string;
-  /** Text to display inside the badge. */
-  label: string;
-  /** URL template — `$1` is replaced by the field value. */
-  url: string;
+  /**
+   * Text of the badge (HTML-escaped), or a function of the matched value and
+   * the entry.
+   */
+  label: string | BadgeFunction;
+  /**
+   * URL template in which `$1` is replaced by the matched value, or a function
+   * of the matched value and the entry. `http(s)`, `mailto` and relative URLs
+   * (`/…`, `./…`, `../…`, `#…`, `?…`) are kept; anything else drops the badge.
+   */
+  url: string | BadgeFunction;
   /**
    * Optional regex applied to the field value.
    *
@@ -42,12 +58,42 @@ export interface BadgeConfig {
    *   group (or the full match when there are no capture groups).
    */
   match?: RegExp;
+  /**
+   * Split the field into several values, each rendered as its own badge, e.g.
+   * `project = {Alpha, Beta}` with `split: ","`. Values are trimmed and
+   * empty ones skipped; `match`, `label` and `url` apply to each value.
+   */
+  split?: string | RegExp;
   /** CSS class name(s) for the badge `<a>` element. */
   className?: string;
 }
 
+/** Computes a badge's label or URL from the matched field value. */
+export type BadgeFunction = (value: string, entry: BibEntry) => string;
+
 /** HTML attributes; `true` renders a valueless attribute, `false` omits it. */
 export type HtmlAttributes = Record<string, string | boolean>;
+
+/** A link the library resolved for an entry: its title link or a badge. */
+export interface Link {
+  kind: "title" | "badge";
+  /** The field the link was built from, as configured (`doi`, `url`, ...). */
+  field: string;
+  /** The matched value: `10.1000/x` for a DOI, one part of a `split` field. */
+  value: string;
+  url: string;
+  /** Badge text; absent for the title link. */
+  label?: string;
+  /** The badge's configured `className`, if any. */
+  className?: string;
+  entry: BibEntry;
+}
+
+/** The links of one entry: its title link and badges. */
+export interface EntryLinks {
+  title?: Link;
+  badges: Link[];
+}
 
 /** Synchronous renderer returning trusted HTML. Sanitize untrusted renderer output. */
 export type MathRenderer = (tex: string, context: { display: boolean }) => string;
@@ -65,11 +111,11 @@ export interface FormatOptions {
   renderMath?: MathRenderer;
 
   /**
-   * Fields to use for linking the title, checked in order.
+   * Fields to use for linking the title, checked in order; the first that
+   * yields a URL wins. A field with a {@link badgePresets} entry (`doi`,
+   * `arxiv`, ...) is expanded by that preset; another field with a configured
+   * badge by that badge; any other field must hold a URL itself.
    * Overrides the constructor default, if any.
-   * A `doi` value is expanded to `https://doi.org/<value>`, an `arxiv`
-   * value to `https://arxiv.org/abs/<value>`, and direct values are only
-   * accepted when they use `http`, `https`, or `mailto`.
    *
    * @default ['url', 'doi', 'arxiv']
    */
@@ -97,6 +143,16 @@ export interface FormatOptions {
    * @default { reversed: true }  (when list is 'ol')
    */
   listAttributes?: HtmlAttributes;
+
+  /**
+   * Also let the CSL style print identifiers that are already linked. By
+   * default, the field used for the title link and the field of every rendered
+   * badge are withheld from the style, so a DOI or URL is not printed again
+   * as text next to its link.
+   *
+   * @default false
+   */
+  printLinkedIdentifiers?: boolean;
 
   /**
    * Turn bare `http(s)://` URLs that the style prints (e.g. in a `note`) into
@@ -129,7 +185,9 @@ export interface BibEntry {
  * Formatting options that can be set once on the constructor and overridden
  * by the options of an individual `formatHtml`/`formatEntry` call.
  */
-export type FormatDefaults = Pick<FormatOptions, "titleLink" | "badges" | "linkifyUrls">;
+export type FormatDefaults = Pick<
+  FormatOptions, "titleLink" | "badges" | "linkifyUrls" | "printLinkedIdentifiers"
+>;
 
 /** Options for constructing a {@link Bibliography}. */
 export interface BibliographyOptions extends FormatDefaults {

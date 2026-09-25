@@ -6,13 +6,16 @@ import type {
   BadgeConfig,
   BibEntry,
   BibliographyOptions,
+  EntryLinks,
   FormatDefaults,
   FormatOptions,
   HtmlAttributes,
+  Link,
 } from "./types.js";
 
 export type {
   BadgeConfig,
+  BadgeFunction,
   BibEntry,
   BibliographyOptions,
   FormatDefaults,
@@ -20,6 +23,51 @@ export type {
   HtmlAttributes,
   MathRenderer,
 } from "./types.js";
+
+/**
+ * Ready-made badges for the identifiers of mathematical bibliographies. Their
+ * matchers accept the spellings found in real exports (`doi:10…`,
+ * `https://doi.org/10…`, `arXiv:2301.00001v2`, `MR1234567`). Use them as they
+ * are, or spread one to change a property:
+ *
+ * ```ts
+ * badges: [{ ...badgePresets.doi, className: "badge" }, badgePresets.arxiv]
+ * ```
+ *
+ * The title link uses the same preset for these fields, so both always agree.
+ */
+export const badgePresets = Object.freeze({
+  doi: Object.freeze({
+    field: "doi",
+    label: "DOI",
+    url: "https://doi.org/$1",
+    match: /^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\S+)$/i,
+  }),
+  arxiv: Object.freeze({
+    field: "arxiv",
+    label: "arXiv",
+    url: "https://arxiv.org/abs/$1",
+    match: /^(?:arxiv:\s*)?(.+?)(?:v\d+)?$/i,
+  }),
+  mrnumber: Object.freeze({
+    field: "mrnumber",
+    label: "MR",
+    url: "https://mathscinet.ams.org/mathscinet-getitem?mr=$1",
+    match: /^(?:MR\s*)?(\d+)/i,
+  }),
+  zbl: Object.freeze({
+    field: "zbl",
+    label: "zbMATH",
+    url: "https://zbmath.org/?q=an:$1",
+    match: /^(?:Zbl\s*)?(\d+\.\d+)/i,
+  }),
+} satisfies Record<string, BadgeConfig>);
+
+const DEFAULT_TITLE_LINK = ["url", "doi", "arxiv"];
+
+const FORMAT_DEFAULT_KEYS = [
+  "titleLink", "badges", "linkifyUrls", "printLinkedIdentifiers",
+] as const satisfies readonly (keyof FormatDefaults)[];
 
 type Engine = InstanceType<typeof CSL.Engine>;
 
@@ -56,7 +104,7 @@ function createEngine(templateName: string, lang: string): Engine {
 /** What the variable wrapper needs while citeproc renders one call's entries. */
 interface Rendering {
   options: FormatOptions;
-  byId: Map<string, { entry: BibEntry; titleUrl: string | null; titleLinked: boolean }>;
+  byId: Map<string, { entry: BibEntry; links: EntryLinks; titleLinked: boolean }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,11 +127,10 @@ export class Bibliography {
   constructor(options: BibliographyOptions) {
     const bibData = maybeReadFile(options.data);
     this.customFieldNames = options.customFields ?? [];
-    this.formatDefaults = {
-      titleLink: options.titleLink,
-      badges: options.badges,
-      linkifyUrls: options.linkifyUrls,
-    };
+    this.formatDefaults = {};
+    for (const key of FORMAT_DEFAULT_KEYS) {
+      if (options[key] !== undefined) (this.formatDefaults as Record<string, unknown>)[key] = options[key];
+    }
 
     // Register CSL style
     this.templateName = this.registerStyle(options.cslStyle);
@@ -190,8 +237,7 @@ export class Bibliography {
 
     const merged = this.mergeOptions(options);
     const tag = merged.list ?? "ol";
-    const attrs = merged.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
-    const attrStr = renderAttributes(withClass(attrs, "csl-bib-body"));
+    const listAttributes = merged.listAttributes ?? (tag === "ol" ? { reversed: true } : {});
     const itemTag = tag === "div" ? "div" : "li";
 
     // Rendered in one citeproc run so style-dependent numbering/state
@@ -201,7 +247,7 @@ export class Bibliography {
       return `<${itemTag} data-csl-entry-id="${escapeAttr(entry.key)}" class="csl-entry">${this.restoreMath(inner, merged, entry)}</${itemTag}>`;
     });
 
-    return `<${tag}${attrStr}>\n${items.join("\n")}\n</${tag}>`;
+    return `<${tag}${renderAttributes(withClass(listAttributes, "csl-bib-body"))}>\n${items.join("\n")}\n</${tag}>`;
   }
 
   // -------------------------------------------------------------------------
@@ -210,45 +256,29 @@ export class Bibliography {
 
   /** Per-call options win over the defaults given to the constructor. */
   private mergeOptions(options: FormatOptions): FormatOptions {
-    return {
-      ...options,
-      titleLink: options.titleLink ?? this.formatDefaults.titleLink,
-      badges: options.badges ?? this.formatDefaults.badges,
-      linkifyUrls: options.linkifyUrls ?? this.formatDefaults.linkifyUrls,
-    };
-  }
-
-  /**
-   * Restore protected math, naming the entry when a renderer rejects a formula.
-   * Without the citation key, `renderMath` failures are near-impossible to
-   * trace back to a line in the .bib file.
-   */
-  private restoreMath(html: string, options: FormatOptions, entry?: BibEntry): string {
-    if (!this.math) return html;
-    try {
-      return this.math.restore(html, options.renderMath);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(entry ? `entry ${entry.key}: ${message}` : message, { cause: error });
+    const merged: FormatOptions = { ...options };
+    for (const key of FORMAT_DEFAULT_KEYS) {
+      if (merged[key] === undefined) (merged as Record<string, unknown>)[key] = this.formatDefaults[key];
     }
+    return merged;
   }
 
   /**
    * Entry HTML without wrapper, shared by `formatEntry` and `formatHtml` so
-   * both honour the same options.
+   * both honour the same options. Links are resolved first: they decide what
+   * the style may print and what is added afterwards.
    */
   private renderItems(entries: BibEntry[], options: FormatOptions): string[] {
-    const byId = new Map(entries.map(entry => [String(entry.csl.id ?? entry.key), {
-      entry,
-      titleUrl: typeof entry.csl.title === "string" && entry.csl.title.trim()
-        ? this.resolveTitleLink(entry, options.titleLink)
-        : null,
-      titleLinked: false,
-    }]));
+    const links = entries.map(entry => this.resolveLinks(entry, options));
+    const csl = entries.map((entry, index) =>
+      displayCsl(entry.csl, options.printLinkedIdentifiers ? [] : linkedFields(links[index]!)));
+
+    const byId = new Map(entries.map((entry, index) =>
+      [String(entry.csl.id ?? entry.key), { entry, links: links[index]!, titleLinked: false }]));
     this.rendering = { options, byId };
     let rendered: Array<[string, string]>;
     try {
-      rendered = this.renderCslEntries(entries.map(entry => entry.csl), "en-US");
+      rendered = this.renderCslEntries(csl, "en-US");
     } finally {
       this.rendering = undefined;
     }
@@ -257,9 +287,8 @@ export class Bibliography {
     return entries.map((entry, index) => {
       const id = String(entry.csl.id ?? entry.key);
       const raw = renderedMap.get(id) ?? rendered[index]?.[1] ?? "";
-      const html = unwrapCslEntry(raw) ?? raw.trim();
-      const { titleUrl, titleLinked } = byId.get(id)!;
-      return this.decorate(entry, html, titleLinked ? null : titleUrl, options);
+      let html = unwrapCslEntry(raw) ?? raw.trim();
+      return decorate(html, byId.get(id)!.titleLinked, links[index]!);
     });
   }
 
@@ -286,12 +315,42 @@ export class Bibliography {
     // substitutes it for missing authors; citeproc then doesn't call it `title`.
     const isTitle = variable === "title"
       || (typeof item.entry.csl.title === "string" && plainText(str) === plainText(item.entry.csl.title));
-    if (isTitle && item.titleUrl && !item.titleLinked) {
-      html = `<a href="${escapeAttr(item.titleUrl)}">${html}</a>`;
+    if (isTitle && item.links.title && !item.titleLinked) {
+      html = linkHtml(item.links.title, html);
       item.titleLinked = true;
     }
     if (state.options.linkifyUrls !== false) html = linkifyBareUrls(html);
     return pre + html + post;
+  }
+
+  /**
+   * Restore protected math, naming the entry when a renderer rejects a formula.
+   * Without the citation key, `renderMath` failures are near-impossible to
+   * trace back to a line in the .bib file.
+   */
+  private restoreMath(html: string, options: FormatOptions, entry?: BibEntry): string {
+    if (!this.math) return html;
+    try {
+      return this.math.restore(html, options.renderMath);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(entry ? `entry ${entry.key}: ${message}` : message, { cause: error });
+    }
+  }
+
+  private resolveLinks(entry: BibEntry, options: FormatOptions): EntryLinks {
+    const badges = options.badges ?? [];
+    const rendered: Link[] = [];
+    for (const badge of badges) {
+      for (const link of applyBadge(entry, badge)) {
+        rendered.push({ kind: "badge", field: badge.field, ...link, className: badge.className, entry });
+      }
+    }
+
+    const title = typeof entry.csl.title === "string" && entry.csl.title.trim()
+      ? resolveTitleLink(entry, options.titleLink ?? DEFAULT_TITLE_LINK, badges)
+      : undefined;
+    return title ? { title, badges: rendered } : { badges: rendered };
   }
 
   private registerStyle(cslStyle?: string): string {
@@ -351,75 +410,6 @@ export class Bibliography {
       current = previous;
     }
   }
-
-  /** The fallback title link and the badges; the title link itself is added by citeproc's wrapper. */
-  private decorate(entry: BibEntry, html: string, fallbackUrl: string | null, options: FormatOptions): string {
-    let out = html;
-    // Never lose a link: a style that doesn't print the title gets its URL.
-    if (fallbackUrl) out += ` <a href="${escapeAttr(fallbackUrl)}">${escapeHtml(fallbackUrl)}</a>`;
-    const badgeHtml = this.renderBadges(entry, options.badges ?? []);
-    if (badgeHtml) out += ` ${badgeHtml}`;
-    return out;
-  }
-
-  private resolveTitleLink(
-    entry: BibEntry,
-    fields?: string[],
-  ): string | null {
-    const order = fields ?? ["url", "doi", "arxiv"];
-    for (const field of order) {
-      const value = entry.raw[field] ?? entry.csl[field.toUpperCase()] ?? entry.csl[field];
-      if (!value) continue;
-      const raw = String(value).trim();
-      if (!raw) continue;
-
-      if (/^https?:\/\//i.test(raw) || /^mailto:/i.test(raw)) {
-        return sanitizeUrl(raw);
-      }
-
-      if (field === "doi") {
-        const doi = raw.replace(/^doi:\s*/i, "");
-        return sanitizeUrl(`https://doi.org/${doi}`);
-      }
-
-      if (field === "arxiv") {
-        return sanitizeUrl(`https://arxiv.org/abs/${raw.replace(/v\d+$/, "")}`);
-      }
-    }
-    return null;
-  }
-
-  private renderBadges(entry: BibEntry, badges: BadgeConfig[]): string {
-    const parts: string[] = [];
-
-    for (const badge of badges) {
-      const rawValue = entry.raw[badge.field] ?? entry.custom[badge.field];
-      if (rawValue == null) continue;
-
-      const strValue = String(rawValue);
-      let insertValue: string;
-
-      if (badge.match) {
-        const m = strValue.match(badge.match);
-        if (!m) continue;
-        insertValue = m[1] ?? m[0];
-      } else {
-        insertValue = strValue;
-      }
-
-      const unsafeUrl = badge.url.replace(/\$1/g, insertValue);
-      const safeUrl = sanitizeUrl(unsafeUrl);
-      if (!safeUrl) continue;
-
-      const cls = badge.className ? ` class="${escapeAttr(badge.className)}"` : "";
-      parts.push(
-        `<a${cls} href="${escapeAttr(safeUrl)}">${escapeHtml(String(badge.label))}</a>`,
-      );
-    }
-
-    if (parts.length === 0) return "";
-    return `<span class="bib-links">${parts.join(" ")}</span>`;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +461,130 @@ export function linkifyBareUrls(html: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Fields and links
+// ---------------------------------------------------------------------------
+
+/**
+ * The value of a BibTeX field, and the only place fields are read. Names are
+ * case-insensitive. A field named like an eprint archive falls back to
+ * `eprint` when `eprinttype`/`archivePrefix` names that archive (biblatex and
+ * arXiv exports). Last, the CSL variable, which covers values citation-js
+ * derives (e.g. `URL` from `howpublished = {\url{…}}`).
+ */
+function fieldValue(entry: BibEntry, field: string): string | undefined {
+  const name = field.toLowerCase();
+  let value = entry.raw[name] ?? entry.raw[field];
+  if (value == null) {
+    const archive = entry.raw.eprinttype ?? entry.raw.archiveprefix;
+    if (archive != null && String(archive).trim().toLowerCase() === name) value = entry.raw.eprint;
+  }
+  value ??= entry.csl[field.toUpperCase()] ?? entry.csl[name];
+  const text = value == null ? "" : String(value).trim();
+  return text || undefined;
+}
+
+/** The links a badge yields for an entry: none, one, or one per `split` value. */
+function applyBadge(entry: BibEntry, badge: BadgeConfig): Array<{ value: string; url: string; label: string }> {
+  const value = fieldValue(entry, badge.field);
+  if (value === undefined) return [];
+  const values = badge.split
+    ? value.split(badge.split).map(part => part.trim()).filter(Boolean)
+    : [value];
+
+  return values.flatMap((part) => {
+    let matched = part;
+    if (badge.match) {
+      const m = part.match(badge.match);
+      if (!m) return [];
+      matched = m[1] ?? m[0];
+    }
+
+    const { url: template, label } = badge;
+    const url = safeUrl(typeof template === "function"
+      ? template(matched, entry)
+      : template.replace(/\$1/g, () => matched));
+    if (!url) return [];
+    return [{ value: matched, url, label: String(typeof label === "function" ? label(matched, entry) : label) }];
+  });
+}
+
+const PRESETS_BY_FIELD: Record<string, BadgeConfig> = Object.fromEntries(
+  Object.values(badgePresets).map(preset => [preset.field, preset]),
+);
+
+/**
+ * The first title-link field that yields a URL. Fields with a preset use it,
+ * so a DOI title link and a DOI badge normalise the same way; other fields use
+ * a configured badge for that field, or must hold a URL themselves.
+ */
+function resolveTitleLink(entry: BibEntry, fields: string[], badges: BadgeConfig[]): Link | undefined {
+  for (const field of fields) {
+    const name = field.toLowerCase();
+    const value = fieldValue(entry, field);
+    if (value === undefined) continue;
+    const template = PRESETS_BY_FIELD[name] ?? badges.find(badge => badge.field.toLowerCase() === name);
+    const link = template ? applyBadge(entry, template)[0] : { value, url: safeUrl(value) };
+    if (link?.url) return { kind: "title", field, value: link.value, url: link.url, entry };
+  }
+  return undefined;
+}
+
+function linkedFields(links: EntryLinks): string[] {
+  const fields = links.badges.map(badge => badge.field);
+  if (links.title) fields.push(links.title.field);
+  return fields;
+}
+
+/**
+ * The CSL data a style gets to see: without the given (linked) fields, in either
+ * spelling (`doi`/`DOI`), and with a DOI it may print reduced to the bare DOI
+ * CSL expects. Exports write `doi:10…` or `https://doi.org/10…`, which a style
+ * would turn into `https://doi.org/doi:10…`.
+ */
+function displayCsl(csl: Record<string, any>, withheld: string[]): Record<string, any> {
+  const copy = { ...csl };
+  for (const field of withheld) {
+    delete copy[field];
+    delete copy[field.toLowerCase()];
+    delete copy[field.toUpperCase()];
+  }
+  if (typeof copy.DOI === "string") {
+    const bare = copy.DOI.trim().match(badgePresets.doi.match)?.[1];
+    if (bare) copy.DOI = bare;
+  }
+  return copy;
+}
+
+/** The fallback title link and the badges; the title link itself is added by citeproc's wrapper. */
+function decorate(html: string, titleLinked: boolean, links: EntryLinks): string {
+  let out = html;
+  // Never lose a link: a style that doesn't print the title gets its URL.
+  if (links.title && !titleLinked) out += ` ${linkHtml(links.title, escapeHtml(links.title.url))}`;
+  if (links.badges.length) {
+    const badges = links.badges.map(link => linkHtml(link, escapeHtml(link.label ?? "")));
+    out += ` <span class="bib-links">${badges.join(" ")}</span>`;
+  }
+  return out;
+}
+
+/** Every `<a>` the library writes. */
+function linkHtml(link: Link, inner: string): string {
+  return `<a${renderAttributes({ ...(link.className ? { class: link.className } : {}), href: link.url })}>${inner}</a>`;
+}
+
+/** Visible text for comparing a rendered variable with a title: no tags, plain quotes, any case. */
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(?:amp|#38|#x26);/gi, "&")
+    .replace(/[\u2018\u2019]|&(?:#39|#x27|apos|rsquo|lsquo);/gi, "'")
+    .replace(/[\u201c\u201d\u201e]|&(?:quot|#34|#x22|ldquo|rdquo);/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -509,25 +623,19 @@ function unwrapCslEntry(entryHtml: string): string | null {
   return (match[2] ?? "").trim();
 }
 
-function sanitizeUrl(url: string): string | null {
+/** `http(s)`, `mailto` and relative URLs; anything with another scheme is dropped. */
+function safeUrl(url: string): string | null {
   const trimmed = url.trim();
-  if (!trimmed) return null;
-  if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) {
-    return trimmed;
-  }
+  if (/^(?:https?:\/\/|mailto:)/i.test(trimmed)) return trimmed;
+  if (/^(?:\/|\.\.?\/|#|\?)/.test(trimmed)) return trimmed;
   return null;
 }
 
-/** Visible text for comparing a rendered variable with a title: no tags, plain quotes, any case. */
-function plainText(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(?:amp|#38|#x26);/gi, "&")
-    .replace(/[\u2018\u2019]|&(?:#39|#x27|apos|rsquo|lsquo);/gi, "'")
-    .replace(/[\u201c\u201d\u201e]|&(?:quot|#34|#x22|ldquo|rdquo);/gi, '"')
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+/** Add a class to the attributes, after any the caller gave. */
+function withClass(attrs: HtmlAttributes, className: string): HtmlAttributes {
+  const { class: extra, ...rest } = attrs;
+  const classes = [typeof extra === "string" ? extra : "", className].filter(Boolean).join(" ");
+  return { ...rest, class: classes };
 }
 
 function escapeAttr(s: string): string {
@@ -541,13 +649,6 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-}
-
-/** Add a class to the attributes, after any the caller gave. */
-function withClass(attrs: HtmlAttributes, className: string): HtmlAttributes {
-  const { class: extra, ...rest } = attrs;
-  const classes = [typeof extra === "string" ? extra : "", className].filter(Boolean).join(" ");
-  return { ...rest, class: classes };
 }
 
 function renderAttributes(attrs: HtmlAttributes): string {
