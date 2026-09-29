@@ -12,9 +12,19 @@ pnpm test:package  # build, pack, install into a temporary project, test the exp
 ```
 
 `test:package` checks the ESM import, the TypeScript declarations under NodeNext
-and Bundler resolution, and MathJax rendering through the installed tarball.
-It prefers the local package cache but may need the registry on a fresh
-machine. CI runs both checks. MathJax is only a development dependency.
+and Bundler resolution (including exact optional properties), BibTeX copying,
+and MathJax rendering through the installed tarball. It prefers the local
+package cache but may need the registry on a fresh machine. CI runs all checks.
+MathJax is only a development dependency.
+
+## Releases
+
+Bump `package.json`, date the changelog entry, run the checks above, and commit.
+Push the release commit, then a matching `vX.Y.Z` tag. `publish.yml` publishes
+that version to npm with provenance; the tag must match `package.json`.
+
+A GitHub Release is optional and does not trigger publishing. The workflow can
+also be run manually and skips versions already on npm.
 
 ## Tests
 

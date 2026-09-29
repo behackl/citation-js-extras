@@ -1,27 +1,19 @@
 # Changelog
 
-## 0.4.0 (unreleased)
-
-**Copy BibTeX.** `bib.bibtex(entry)` returns an entry as BibTeX that stands on
-its own, for a "Copy BibTeX" button on a publication list. See
-[Copying an entry's BibTeX](docs/layout.md#copying-an-entrys-bibtex).
+## 0.4.0 (2026-09-29)
 
 ### Added
 
-- `bib.bibtex(entry, { exclude })`: the original key, type and TeX, with
-  `@string` abbreviations resolved and `crossref` parents filled in using
-  biblatex's title-remapping rules. Missing parents leave `crossref` unresolved.
-- `TitleLink` and `BadgeLink` types. `bib.links(entry).badges` are `BadgeLink`s,
-  whose `label` is a `string`; `linkAttributes` gets either, told apart by
-  `kind`. `Link` is unchanged.
-- Docs: the inline styles citeproc writes (small caps, upright text in an
-  italic title) and how to let them through a sanitizer.
+- `bib.bibtex(entry, { exclude })` for copying BibTeX, with resolved strings
+  and crossref inheritance. See [copy buttons](docs/layout.md#copying-an-entrys-bibtex).
+- `TitleLink` and `BadgeLink`: badge labels are strings; `linkAttributes`
+  narrows by `kind`. Compatible with exact optional property types.
+- Sanitizer guidance for citeproc's inline styles.
 
 ### Fixed
 
-- Attributes may be `undefined`, which omits them like `false`. A
-  `linkAttributes` returning different attributes per branch
-  (`cond ? { href } : {}`) no longer fails to compile under `strict`.
+- Undefined HTML attributes are omitted; conditional attribute objects now
+  compile under strict TypeScript.
 
 ## 0.3.0 (2026-09-25)
 
