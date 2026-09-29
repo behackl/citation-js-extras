@@ -96,6 +96,7 @@ See [Mathematics and sanitizing](docs/math.md).
 | how entries read | the CSL style (`cslStyle`) and locale (`lang`) | [Layout](docs/layout.md#styles-and-locales) |
 | the markup around entries | `list`, `listAttributes`, `itemAttributes`, `badgeListClassName` | [Layout](docs/layout.md#markup) |
 | a layout of your own | `links(entry)`, `appendBadges`, `wrapVariable` | [Layout](docs/layout.md#laying-out-entries-yourself) |
+| a "Copy BibTeX" button | `bibtex(entry)` | [Layout](docs/layout.md#copying-an-entrys-bibtex) |
 | what reaches the page | `sanitize`, `renderMath` | [Mathematics](docs/math.md) |
 | order and selection | `sort`, `filter`, or array methods on `bib.entries` | [API](docs/api.md#bibsortentries-options) |
 

@@ -17,7 +17,7 @@
 | `li` (or `div`) with class `csl-entry` and `data-csl-entry-id` | `itemAttributes: (entry) => ({ id: "pub-" + entry.key })` |
 | `span.bib-links` around the badges | `badgeListClassName`, or `appendBadges: false` |
 | the `a` elements | a badge's `className`; `linkAttributes` for all links |
-| everything inside the entry | the CSL style: `<i>`, `<b>`, `div.csl-block` for `display="block"`, `div.csl-left-margin`/`div.csl-right-inline` in numbered styles; plus whatever `wrapVariable` adds |
+| everything inside the entry | the CSL style: `<i>`, `<b>`, `<span style>` for [other formatting](math.md#formatting-the-style-writes), `div.csl-block` for `display="block"`, `div.csl-left-margin`/`div.csl-right-inline` in numbered styles; plus whatever `wrapVariable` adds |
 
 Classes you give are added to the library's own. A [sanitizer](math.md#sanitizing)
 must allow these classes, `data-csl-entry-id`, and any attributes you add. With
@@ -93,3 +93,51 @@ Linked identifiers are still left out of the text, and the title is still
 linked. In your template, render `links` however the design wants, for example
 the arXiv id as "Archived at: arxiv:2501.01234" from its `value`, or project
 badges as router links.
+
+## Copying an entry's BibTeX
+
+`bib.bibtex(entry)` returns the entry as BibTeX that a reader can paste into
+their own `.bib` file: the original key and TeX, with `@string` abbreviations
+resolved and the fields of a `crossref` parent filled in. If the parent is
+missing (keys are case-sensitive), the unresolved `crossref` stays, so the copy
+may still require its parent. Leave out the fields that are only for your page:
+
+```ts
+bib.bibtex(entry, { exclude: ["status", "project", "file"] });
+```
+
+**With `formatHtml`**, put it on each item, and add the buttons in the browser:
+
+```ts
+const html = bib.formatHtml(entries, {
+  itemAttributes: (entry) => ({ "data-bibtex": bib.bibtex(entry, { exclude: ["status"] }) }),
+});
+```
+
+```html
+<script type="module">
+  // The clipboard is only available on https:// pages and on localhost.
+  if (navigator.clipboard) {
+    for (const item of document.querySelectorAll("[data-bibtex]")) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Copy BibTeX";
+      button.addEventListener("click", () => {
+        navigator.clipboard.writeText(item.dataset.bibtex).then(
+          () => { button.textContent = "Copied"; },
+          () => { button.textContent = "Copy failed"; },
+        );
+      });
+      item.append(button);
+    }
+  }
+</script>
+```
+
+A [sanitizer](math.md#sanitizing) must allow the attribute. With
+`rehype-sanitize`, add it to those of `li`:
+`li: [...(defaultSchema.attributes?.li ?? []), "dataBibtex"]`.
+
+**In your own layout**, pass it on with the entry's `html` and `links` from
+above, and render it as text: in a `<pre>`, or behind a button that calls
+`navigator.clipboard.writeText`.

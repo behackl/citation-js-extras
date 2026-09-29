@@ -74,8 +74,11 @@ export interface BadgeConfig {
 /** Computes a badge's label or URL from the matched field value. */
 export type BadgeFunction = (value: string, entry: BibEntry) => string;
 
-/** HTML attributes; `true` renders a valueless attribute, `false` omits it. */
-export type HtmlAttributes = Record<string, string | boolean>;
+/**
+ * HTML attributes; `true` renders a valueless attribute, `false` and
+ * `undefined` omit it.
+ */
+export type HtmlAttributes = Record<string, string | boolean | undefined>;
 
 /** A link the library resolved for an entry: its title link or a badge. */
 export interface Link {
@@ -92,10 +95,23 @@ export interface Link {
   entry: BibEntry;
 }
 
+/** An entry's title link. */
+export interface TitleLink extends Link {
+  kind: "title";
+  label?: never;
+  className?: never;
+}
+
+/** A badge link, which always has a label. */
+export interface BadgeLink extends Link {
+  kind: "badge";
+  label: string;
+}
+
 /** The links of one entry, as returned by `Bibliography.links`. */
 export interface EntryLinks {
-  title?: Link;
-  badges: Link[];
+  title?: TitleLink;
+  badges: BadgeLink[];
 }
 
 /** Synchronous renderer returning trusted HTML. Sanitize untrusted renderer output. */
@@ -192,7 +208,7 @@ export interface FormatOptions {
    * `className`; an `href` replaces the URL (it must still be `http(s)`,
    * `mailto` or relative, or the link is dropped).
    */
-  linkAttributes?: (link: Link) => HtmlAttributes;
+  linkAttributes?: (link: TitleLink | BadgeLink) => HtmlAttributes;
 
   /**
    * Wrap the rendered HTML of each CSL variable in the bibliography (and the
@@ -217,6 +233,12 @@ export interface FormatOptions {
    * @default true
    */
   linkifyUrls?: boolean;
+}
+
+/** Options for {@link Bibliography.bibtex}. */
+export interface BibtexOptions {
+  /** Fields to leave out, case-insensitively, e.g. private ones like `status` or `file`. */
+  exclude?: string[];
 }
 
 /** A bibliography entry enriched with custom BibTeX fields. */

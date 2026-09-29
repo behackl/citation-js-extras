@@ -6,6 +6,7 @@ Use Node 24, as CI and publishing do.
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm typecheck     # sources and tests; vitest itself doesn't check types
 pnpm test          # unit tests, and MathJax SVG rendering (base + AMS)
 pnpm test:package  # build, pack, install into a temporary project, test the exports
 ```

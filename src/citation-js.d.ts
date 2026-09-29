@@ -49,6 +49,6 @@ declare module "citeproc" {
     makeBibliography(): [Record<string, unknown>, string[]] | false;
   }
 
-  const CSL: { Engine: typeof Engine };
+  const CSL: { Engine: typeof Engine; Output: { Formats: { html: Record<string, unknown> } } };
   export default CSL;
 }

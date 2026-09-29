@@ -83,6 +83,16 @@ describe("linkAttributes", () => {
     expect(unsafe).not.toContain("javascript:");
     expect(unsafe).toContain("DOI"); // the label stays, unlinked
   });
+
+  it("omits undefined attributes", () => {
+    const b = bib();
+    const html = b.formatEntry(b.entries[0]!, {
+      linkAttributes: link => ({ title: link.kind === "badge" ? link.label.toLowerCase() : undefined }),
+    });
+    expect(html).toContain('<a href="https://doi.org/10.1000/x" title="doi">DOI</a>');
+    expect(html.match(/ title=/g)).toHaveLength(4);
+    expect(html).not.toContain("undefined");
+  });
 });
 
 describe("wrapVariable", () => {

@@ -45,8 +45,8 @@ try {
 
   writeFileSync(join(temp, "consumer.ts"), `
 import {
-  Bibliography, badgePresets, type BadgeConfig, type BibliographyOptions, type EntryLinks, type Link,
-  type MathRenderer,
+  Bibliography, badgePresets, type BadgeConfig, type BadgeLink, type BibliographyOptions, type BibtexOptions,
+  type EntryLinks, type Link, type MathRenderer,
 } from "@behackl/citation-js-extras";
 const options: BibliographyOptions = { data: "@article{a,title={Test {$x$}},year={2025}}", preserveMath: true, lang: "de-DE" };
 const bib = new Bibliography(options);
@@ -61,12 +61,20 @@ const html: string = bib.formatHtml(bib.sort(bib.entries, { by: "date" }), {
   wrapVariable: (inner, { variable }) => "<span data-v=" + variable + ">" + inner + "</span>",
 });
 const links: EntryLinks = bib.links(bib.entries[0]);
+const labels: string[] = links.badges.map((link: BadgeLink) => link.label);
+const bibtexOptions: BibtexOptions = { exclude: ["status"] };
+const copied: string = bib.bibtex(bib.entries[0], bibtexOptions);
+const narrowedAttributes = bib.formatEntry(bib.entries[0], {
+  linkAttributes: link => link.kind === "badge" ? { title: link.label.toLowerCase() } : {},
+});
 const entry: string = bib.formatEntry(bib.entries[0], { renderMath });
 `);
   // Exercise both Node and bundler resolution against the published exports.
   for (const [module, moduleResolution] of [["NodeNext", "NodeNext"], ["ESNext", "Bundler"]]) {
-    run(["exec", "tsc", "--noEmit", "--strict", "--target", "ES2022",
-      "--module", module, "--moduleResolution", moduleResolution, "consumer.ts"]);
+    for (const optionalFlags of [[], ["--exactOptionalPropertyTypes"]]) {
+      run(["exec", "tsc", "--noEmit", "--strict", ...optionalFlags, "--target", "ES2022",
+        "--module", module, "--moduleResolution", moduleResolution, "consumer.ts"]);
+    }
   }
 
   writeFileSync(join(temp, "consumer.mjs"), String.raw`
@@ -109,10 +117,16 @@ const sanitized = bib.formatHtml(bib.entries, {
   sanitize: input => { assert(!input.includes("<svg")); return input; },
 });
 assert(sanitized.includes("<svg"));
-console.log("Packed consumer: public ESM import + MathJax SVG PASS");
+const copied = bib.bibtex(bib.entries[0]);
+assert(copied.includes("$\\alpha + \\frac{1}{\\pi}$"));
+const copy = new Bibliography({ data: copied, preserveMath: true });
+const fieldValues = raw => Object.fromEntries(Object.entries(raw).map(([field, value]) => [field, String(value)]));
+assert.deepEqual(fieldValues(copy.entries[0].raw), fieldValues(bib.entries[0].raw));
+assert.equal(copy.formatEntry(copy.entries[0]), bib.formatEntry(bib.entries[0]));
+console.log("Packed consumer: public ESM import + MathJax SVG + BibTeX copy PASS");
 `);
   execFileSync(process.execPath, ["consumer.mjs"], { cwd: temp, stdio: "inherit", timeout: 30_000 });
-  console.log("Packed consumer: NodeNext + Bundler declarations PASS");
+  console.log("Packed consumer: NodeNext + Bundler declarations (including exact optional properties) PASS");
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

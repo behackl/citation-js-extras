@@ -63,3 +63,33 @@ Your schema has to allow the classes and attributes the library writes. See
 Rendered math is inserted after sanitizing, so it is exactly as safe as your
 renderer. KaTeX with its default `trust: false` is safe; a renderer allowed to emit
 arbitrary HTML is not.
+
+### Formatting the style writes
+
+Most formatting is `<i>`, `<b>`, `<sup>` and `<sub>`. For the rest citeproc
+writes a `<span>` with one of a few fixed `style` values: small caps,
+underlining, and switching back to upright, normal weight or no underline.
+Switching back to upright is common: `\emph{…}` in a title the style sets in
+italics comes out as `<span style="font-style:normal;">…</span>`. A sanitizer
+that drops `style` loses that formatting silently.
+
+These values are safe to allow exactly, without allowing `style` in general.
+With `rehype-sanitize`:
+
+```ts
+import { defaultSchema } from "rehype-sanitize";
+
+const schema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    span: [["style",
+      "font-style:normal;", "font-variant:small-caps;", "font-variant:normal;",
+      "font-weight:normal;", "text-decoration:none;", "text-decoration:underline;",
+    ]],
+  },
+};
+```
+
+citeproc also writes `style="baseline"` for `vertical-align="baseline"`; it is
+not valid CSS, so dropping it changes nothing.

@@ -4,26 +4,31 @@ import CSL from "citeproc";
 import { MathProtector } from "./math.js";
 import type {
   BadgeConfig,
+  BadgeLink,
   BibEntry,
   BibliographyOptions,
+  BibtexOptions,
   EntryLinks,
   FormatDefaults,
   FormatOptions,
   HtmlAttributes,
-  Link,
+  TitleLink,
 } from "./types.js";
 
 export type {
   BadgeConfig,
   BadgeFunction,
+  BadgeLink,
   BibEntry,
   BibliographyOptions,
+  BibtexOptions,
   EntryLinks,
   FormatDefaults,
   FormatOptions,
   HtmlAttributes,
   Link,
   MathRenderer,
+  TitleLink,
 } from "./types.js";
 
 /**
@@ -123,6 +128,7 @@ export class Bibliography {
   readonly entries: BibEntry[];
 
   private readonly customFieldNames: string[];
+  private readonly bibtexEntries = new Map<string, { type: string; properties: Record<string, any> }>();
   private readonly math?: MathProtector;
   /** Formatting defaults from the constructor; each call may override them. */
   private readonly formatDefaults: FormatDefaults;
@@ -143,11 +149,10 @@ export class Bibliography {
     const { plugins } = Cite;
     const rawEntries: { type: string; label: string; properties: Record<string, any> }[] =
       plugins.input.chainLink(bibData);
-    const rawMap = new Map<string, Record<string, any>>();
     const duplicates = new Set<string>();
     for (const entry of rawEntries) {
-      if (rawMap.has(entry.label)) duplicates.add(entry.label);
-      rawMap.set(entry.label, entry.properties);
+      if (this.bibtexEntries.has(entry.label)) duplicates.add(entry.label);
+      this.bibtexEntries.set(entry.label, entry);
     }
     // Raw fields are merged by key, so a duplicate would silently give one
     // entry the other's fields.
@@ -167,7 +172,7 @@ export class Bibliography {
     this.entries = (cite.data as Record<string, any>[]).map(
       (csl): BibEntry => {
         const key = String(csl["citation-key"] || csl.id);
-        const raw = rawMap.get(key) ?? {};
+        const raw = this.bibtexEntries.get(key)?.properties ?? {};
         const custom: Record<string, string> = {};
         for (const f of this.customFieldNames) {
           const value = raw[f.toLowerCase()] ?? raw[f];
@@ -271,9 +276,61 @@ export class Bibliography {
     return this.resolveLinks(entry, this.mergeOptions(options));
   }
 
+  /**
+   * The entry as BibTeX that stands on its own, e.g. for readers to copy:
+   * `@string` abbreviations are resolved and the fields of `crossref` parents
+   * filled in using biblatex's title-remapping rules. Missing parents leave
+   * `crossref` unresolved, so the copy may still require its parent.
+   * Field values are the TeX of the `.bib` file. Requires this bibliography's
+   * original key and raw object; shallow entry copies are accepted.
+   */
+  bibtex(entry: BibEntry, options: BibtexOptions = {}): string {
+    const source = this.bibtexEntries.get(entry.key);
+    if (!source || source.properties !== entry.raw) {
+      throw new Error(`entry ${entry.key}: not in this bibliography`);
+    }
+    const { type } = source;
+
+    const fields: Record<string, unknown> = this.withInherited(type, entry.raw);
+    if (fields !== entry.raw) delete fields.crossref;
+
+    const exclude = new Set((options.exclude ?? []).map(field => field.toLowerCase()));
+    const lines = Object.entries(fields)
+      .filter(([name, value]) => value != null && !exclude.has(name))
+      .map(([name, value]) => `  ${name} = ${bibtexValue(name, value)},`);
+    return [`@${type}{${entry.key},`, ...lines, "}"].join("\n");
+  }
+
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * An entry's fields with those inherited through `crossref`, using the same
+   * biblatex title-remapping rules as citation-js (`plugin-bibtex`'s
+   * `mapping/crossref.js`). Keep the mapping and exclusion tests in sync.
+   */
+  private withInherited(type: string, raw: Record<string, any>): Record<string, any> {
+    const parent = raw.crossref == null ? undefined : this.bibtexEntries.get(String(raw.crossref));
+    if (!parent || parent.properties === raw) return raw;
+
+    const inherited = { ...this.withInherited(parent.type, parent.properties) };
+    for (const field of NOT_INHERITED) delete inherited[field];
+    if ((parent.type === "mvbook" || parent.type === "book") && BOOK_PARTS.includes(type)) {
+      inherited.bookauthor = inherited.author;
+    }
+    const [prefix, children] = TITLE_INHERITANCE[parent.type] ?? [];
+    if (prefix && children!.includes(type)) {
+      inherited[`${prefix}title`] = inherited.title;
+      inherited[`${prefix}subtitle`] = inherited.subtitle;
+      if (prefix !== "journal") inherited[`${prefix}titleaddon`] = inherited.titleaddon;
+      for (const field of TITLE_FIELDS) delete inherited[field];
+    }
+
+    const fields = { ...raw };
+    for (const [name, value] of Object.entries(inherited)) if (!Object.hasOwn(fields, name)) fields[name] = value;
+    return fields;
+  }
 
   /** Per-call options win over the defaults given to the constructor. */
   private mergeOptions(options: FormatOptions): FormatOptions {
@@ -355,7 +412,7 @@ export class Bibliography {
 
   private resolveLinks(entry: BibEntry, options: FormatOptions): EntryLinks {
     const badges = options.badges ?? [];
-    const rendered: Link[] = [];
+    const rendered: BadgeLink[] = [];
     for (const badge of badges) {
       for (const link of applyBadge(entry, badge)) {
         rendered.push({ kind: "badge", field: badge.field, ...link, className: badge.className, entry });
@@ -480,6 +537,41 @@ export function linkifyBareUrls(html: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Biblatex's non-inherited metadata. Intentionally uses `shorthand` and
+ * `shorthandintro`: plugin-bibtex 0.7.21 misspells these as `shortand` and
+ * `shortandintro`, so this exclusion differs from that version's implementation.
+ */
+const NOT_INHERITED = [
+  "ids", "crossref", "xref", "entryset", "entrysubtype", "execute", "label", "options", "presort",
+  "related", "relatedoptions", "relatedstring", "relatedtype", "shorthand", "shorthandintro", "sortkey",
+];
+const TITLE_FIELDS = ["title", "subtitle", "titleaddon", "shorttitle", "sorttitle", "indextitle", "indexsorttitle"];
+const BOOK_PARTS = ["inbook", "bookinbook", "suppbook"];
+const COLLECTION_PARTS = ["incollection", "inreference", "suppcollection"];
+/** A parent's `title` becomes `<prefix>title` in children of these types. */
+const TITLE_INHERITANCE: Record<string, [prefix: string, children: string[]]> = {
+  mvbook: ["main", ["book", ...BOOK_PARTS]],
+  mvcollection: ["main", ["collection", "reference", ...COLLECTION_PARTS]],
+  mvreference: ["main", ["collection", "reference", ...COLLECTION_PARTS]],
+  mvproceedings: ["main", ["proceedings", "inproceedings"]],
+  book: ["book", BOOK_PARTS],
+  collection: ["book", COLLECTION_PARTS],
+  reference: ["book", COLLECTION_PARTS],
+  proceedings: ["book", ["inproceedings"]],
+  periodical: ["journal", ["article", "suppperiodical"]],
+};
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** A field value in braces, with the whitespace BibTeX would compress anyway compressed. */
+function bibtexValue(name: string, value: unknown): string {
+  const text = String(value).replace(/\s*\n\s*/g, " ");
+  // citation-js reads `month = mar` as "03"; the abbreviation is what BibTeX styles expect.
+  if (name === "month" && /^(?:0[1-9]|1[0-2])$/.test(text)) return MONTHS[Number(text) - 1]!;
+  return `{${text}}`;
+}
+
+/**
  * The value of a BibTeX field, and the only place fields are read. Names are
  * case-insensitive. A field named like an eprint archive falls back to
  * `eprint` when `eprinttype`/`archivePrefix` names that archive (biblatex and
@@ -536,7 +628,7 @@ const PRESETS_BY_FIELD: Record<string, BadgeConfig> = Object.fromEntries(
  * so a DOI title link and a DOI badge normalise the same way; other fields use
  * a configured badge for that field, or must hold a URL themselves.
  */
-function resolveTitleLink(entry: BibEntry, fields: string[], badges: BadgeConfig[]): Link | undefined {
+function resolveTitleLink(entry: BibEntry, fields: string[], badges: BadgeConfig[]): TitleLink | undefined {
   for (const field of fields) {
     const name = field.toLowerCase();
     const value = fieldValue(entry, field);
@@ -580,7 +672,7 @@ function decorate(html: string, titleLinked: boolean, links: EntryLinks, options
   // Never lose a link: a style that doesn't print the title gets its URL.
   if (links.title && !titleLinked) out += ` ${linkHtml(links.title, escapeHtml(links.title.url), options)}`;
   if (links.badges.length && options.appendBadges !== false) {
-    const badges = links.badges.map(link => linkHtml(link, escapeHtml(link.label ?? ""), options));
+    const badges = links.badges.map(link => linkHtml(link, escapeHtml(link.label), options));
     out += ` <span class="${escapeAttr(options.badgeListClassName ?? "bib-links")}">${badges.join(" ")}</span>`;
   }
   return out;
@@ -591,7 +683,7 @@ function decorate(html: string, titleLinked: boolean, links: EntryLinks, options
  * class, or replace the URL; a replaced URL is checked like any other, and an
  * unsafe one leaves the text unlinked.
  */
-function linkHtml(link: Link, inner: string, options: FormatOptions): string {
+function linkHtml(link: TitleLink | BadgeLink, inner: string, options: FormatOptions): string {
   const extra = options.linkAttributes ? attributed(link.entry, () => options.linkAttributes!(link)) : {};
   const { class: extraClass, href, ...rest } = extra;
   const url = typeof href === "string" ? safeUrl(href) : link.url;
@@ -711,7 +803,7 @@ function renderAttributes(attrs: HtmlAttributes): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(attrs)) {
     if (v === true) parts.push(k);
-    else if (v !== false) parts.push(`${k}="${escapeAttr(String(v))}"`);
+    else if (v !== false && v !== undefined) parts.push(`${k}="${escapeAttr(String(v))}"`);
   }
   return parts.length ? " " + parts.join(" ") : "";
 }

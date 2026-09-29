@@ -2,7 +2,7 @@
 
 ```ts
 import { Bibliography, badgePresets, linkifyBareUrls } from "@behackl/citation-js-extras";
-import type { BadgeConfig, BibEntry, EntryLinks, FormatOptions, Link } from "@behackl/citation-js-extras";
+import type { BadgeConfig, BadgeLink, BibEntry, EntryLinks, FormatOptions, TitleLink } from "@behackl/citation-js-extras";
 ```
 
 ## `new Bibliography(options)`
@@ -90,22 +90,84 @@ resolution as the HTML, so the two always agree.
 
 ```ts
 interface EntryLinks {
-  title?: Link;   // the title link
-  badges: Link[]; // one per badge, and one per value of a `split` field
+  title?: TitleLink;
+  badges: BadgeLink[]; // one per badge, and one per value of a `split` field
 }
 
-interface Link {
-  kind: "title" | "badge";
+interface TitleLink {
+  kind: "title";
   field: string;      // the configured field, e.g. "doi"
   value: string;      // the matched value, e.g. "10.5555/aia.2025.12"
   url: string;
-  label?: string;     // badges only
-  className?: string; // badges only
+  entry: BibEntry;
+}
+
+interface BadgeLink {
+  kind: "badge";
+  field: string;
+  value: string;
+  url: string;
+  label: string;
+  className?: string;
   entry: BibEntry;
 }
 ```
 
+`Link` is the type both extend, with `kind: "title" | "badge"` and an optional `label`.
+
 See [Laying out entries yourself](layout.md#laying-out-entries-yourself).
+
+## `bib.bibtex(entry, options?)`
+
+The entry as BibTeX that stands on its own, for readers to copy. For the entry
+of the [quick start](../README.md#quick-start):
+
+```ts
+bib.bibtex(entry, { exclude: ["status"] });
+```
+
+```bibtex
+@article{lindqvist2025,
+  author = {Lindqvist, Maja and Sato, Ren},
+  title = {Sobolev estimates for $L^p$ averages},
+  journal = {Annals of Invented Analysis},
+  volume = {12},
+  pages = {1--44},
+  year = {2025},
+  doi = {10.5555/aia.2025.12},
+  eprint = {2501.01234},
+  eprinttype = {arxiv},
+}
+```
+
+- The citation key and entry type are preserved; the parser normalizes entry
+  types and field names to lowercase. Source field order is retained, with
+  inherited fields appended. Values preserve TeX, whitespace aside;
+  `preserveMath` doesn't change them. Two-digit numeric months are written as
+  standard abbreviations (`03` becomes `mar`); a month written `mar` stays `mar`.
+- `@string` abbreviations are resolved.
+- The fields of `crossref` parents fill in those the entry lacks, using the
+  same biblatex title-remapping rules as citation-js: a parent's `title` becomes
+  the `booktitle` of an `@inproceedings` in `@proceedings` or an `@incollection`
+  in `@collection`, the `maintitle` of a
+  volume of an `@mvbook`, the `journaltitle` of an `@article` in a
+  `@periodical`; `sortkey`, `ids` and the like aren't inherited. The `crossref`
+  field is then dropped. Keys match case-sensitively.
+- If a `crossref` parent is missing, including a case-mismatched key, the
+  reference is retained unresolved. The exported entry may then still require
+  its parent.
+- A classic BibTeX `@incollection` in a `@book` inherits no book title, on the
+  page or in the copy, unless the `@book` has a `booktitle`.
+- `exclude` lists fields to leave out, case-insensitively.
+- Requires an entry's original key and `raw` object from this `Bibliography`.
+  Shallow copies (`{ ...entry }`) are accepted; entries from another bibliography
+  (even with the same key), changed keys and replaced/deep-cloned `raw` objects throw.
+
+Some citation-js versions cannot auto-detect a `.bib` file containing only an
+`@suppcollection` or `@suppperiodical` entry. These exports are valid biblatex;
+when reading them with citation-js, use `new Cite(text, { forceType: "@biblatex/text" })`.
+
+See [Copying an entry's BibTeX](layout.md#copying-an-entrys-bibtex) for a copy button.
 
 ## Formatting options
 
@@ -128,7 +190,7 @@ Given to `formatHtml`, `formatEntry` or `links`, or to the constructor as defaul
 | `list` | `'ol'` | `'ol'`, `'ul'` or `'div'`; per call only |
 | `listAttributes` | `{ reversed: true }` for `ol` | attributes of the list; per call only |
 
-Attributes are objects: `true` writes a bare attribute, `false` omits it. A
+Attributes are objects: `true` writes a bare attribute, `false` and `undefined` omit it. A
 `class` you give is added to the library's own.
 
 If a function you pass in throws, the error names the entry

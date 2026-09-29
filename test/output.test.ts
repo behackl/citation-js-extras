@@ -2,6 +2,7 @@
  * The markup around entries, sanitizing, locale, and that `formatEntry` and
  * `formatHtml` agree.
  */
+import CSL from "citeproc";
 import { describe, expect, it } from "vitest";
 import { Bibliography, badgePresets } from "../src/index.js";
 import { SAMPLE_BIB } from "./fixtures.js";
@@ -57,6 +58,17 @@ describe("sanitize", () => {
   it("works without mathematics", () => {
     const bib = new Bibliography({ data: SAMPLE_BIB });
     expect(bib.formatHtml(bib.entries, { sanitize: html => html.toUpperCase() })).toContain("CSL-BIB-BODY");
+  });
+
+  it("meets only the inline styles docs/math.md lists for sanitizer schemas", () => {
+    const styles = Object.values(CSL.Output.Formats.html)
+      .flatMap(format => typeof format === "string" ? [...format.matchAll(/style="([^"]*)"/g)] : [])
+      .map(match => match[1]);
+    expect(new Set(styles)).toEqual(new Set([
+      "font-style:normal;", "font-variant:small-caps;", "font-variant:normal;",
+      "font-weight:normal;", "text-decoration:none;", "text-decoration:underline;",
+      "baseline",
+    ]));
   });
 });
 

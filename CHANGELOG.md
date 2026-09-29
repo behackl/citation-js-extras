@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+**Copy BibTeX.** `bib.bibtex(entry)` returns an entry as BibTeX that stands on
+its own, for a "Copy BibTeX" button on a publication list. See
+[Copying an entry's BibTeX](docs/layout.md#copying-an-entrys-bibtex).
+
+### Added
+
+- `bib.bibtex(entry, { exclude })`: the original key, type and TeX, with
+  `@string` abbreviations resolved and `crossref` parents filled in using
+  biblatex's title-remapping rules. Missing parents leave `crossref` unresolved.
+- `TitleLink` and `BadgeLink` types. `bib.links(entry).badges` are `BadgeLink`s,
+  whose `label` is a `string`; `linkAttributes` gets either, told apart by
+  `kind`. `Link` is unchanged.
+- Docs: the inline styles citeproc writes (small caps, upright text in an
+  italic title) and how to let them through a sanitizer.
+
+### Fixed
+
+- Attributes may be `undefined`, which omits them like `false`. A
+  `linkAttributes` returning different attributes per branch
+  (`cond ? { href } : {}`) no longer fails to compile under `strict`.
+
 ## 0.3.0 (2026-09-25)
 
 **Your own layout.** Pages can lay out entries however their design wants:

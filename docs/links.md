@@ -117,8 +117,9 @@ bib.formatHtml(entries, {
 });
 ```
 
-It receives the [`Link`](api.md#biblinksentry-options): its `kind`, `field`,
-matched `value`, `url`, and the entry. A `class` is added to the badge's own
+It receives the [link](api.md#biblinksentry-options): its `kind`, `field`,
+matched `value`, `url`, and the entry; after checking `kind === "badge"`, also
+its `label`. A `class` is added to the badge's own
 `className`; an `href` replaces the URL and must itself be allowed.
 
 To render the links yourself instead, see
